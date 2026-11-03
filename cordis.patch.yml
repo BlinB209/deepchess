@@ -1,0 +1,5 @@
+# Bundle patch: one Host row. The row id is also the Client factory id and the
+# right-sidebar tab type, so the three never drift apart.
+- insert:
+    - id: deepchess
+      name: deepchess
