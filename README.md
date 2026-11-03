@@ -1,11 +1,16 @@
 # 深棋 DeepChess
 
-右侧栏里的像素风国际象棋：对手是 DeepSeek 娘「小鲸」，会看棋、会斗嘴、会记住你刚送了什么。
+为 **DeepSeek Harness** 右侧栏打造的像素风国际象棋插件。对手是 DeepSeek 娘「小鲸」：会下棋、会斗嘴，也会记住你刚送了什么。
 
-GitHub：https://github.com/BlinB209/deepchess
+- GitHub：https://github.com/BlinB209/deepchess
+- 版本：0.3.0
+- 许可：代码 MIT；角色素材 CC BY-NC-SA 4.0（非商业）
 
-![预览](preview.png)
+![窄面板预览](preview.png)
 
+## 简介
+
+- 纯前端 DSH 右侧栏插件，安装后刷新即可打开
 - 完整国际象棋规则（易位、吃过路兵、升变、将死/逼和、50 回合、三次重复、子力不足）
 - 五档 AI：摸鱼 / 陪练 / 认真 / 鲸鱼 / 深渊，面板顶部直接切换
 - 18 种表情，按局面和事件切换，带情绪历史避免连续重复
@@ -15,6 +20,10 @@ GitHub：https://github.com/BlinB209/deepchess
 - 走子有滑行动画、将军有棋盘抖动
 - 她有权拒绝和棋：领先或均势时她会说不，只有明显劣势才考虑接受
 - 纯本地：存档在 `localStorage`，不联网、不写会话日志
+
+宽面板效果：
+
+![宽面板预览](wide-preview.png)
 
 ## 安装
 
