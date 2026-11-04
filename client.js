@@ -699,35 +699,35 @@ function perft(position, depth) {
 const LEVELS = {
   l1: {
     id: 'l1', title: '摸鱼', rating: 800,
-    depth: 1, timeMs: 140, nodes: 40000, blunder: 0.34, noise: 90, quiesce: false,
+    depth: 1, timeMs: 160, nodes: 40000, blunder: 0.22, blunderLoss: 350, noise: 80, quiesce: false,
   },
   l2: {
     id: 'l2', title: '陪练', rating: 1100,
-    depth: 2, timeMs: 450, nodes: 120000, blunder: 0.18, noise: 50, quiesce: true,
+    depth: 2, timeMs: 500, nodes: 120000, blunder: 0.1, blunderLoss: 260, noise: 45, quiesce: true,
   },
   l3: {
     id: 'l3', title: '入门', rating: 1400,
-    depth: 3, timeMs: 850, nodes: 260000, blunder: 0.08, noise: 24, quiesce: true,
+    depth: 3, timeMs: 900, nodes: 260000, blunder: 0.04, blunderLoss: 180, noise: 20, quiesce: true,
   },
   l4: {
     id: 'l4', title: '认真', rating: 1700,
-    depth: 4, timeMs: 1300, nodes: 450000, blunder: 0.02, noise: 12, quiesce: true,
+    depth: 4, timeMs: 1300, nodes: 450000, blunder: 0.015, blunderLoss: 120, noise: 10, quiesce: true,
   },
   l5: {
     id: 'l5', title: '进阶', rating: 2000,
-    depth: 5, timeMs: 1800, nodes: 650000, blunder: 0, noise: 6, quiesce: true,
+    depth: 5, timeMs: 1800, nodes: 650000, blunder: 0, blunderLoss: 0, noise: 6, quiesce: true,
   },
   l6: {
     id: 'l6', title: '熟练', rating: 2200,
-    depth: 6, timeMs: 2400, nodes: 900000, blunder: 0, noise: 3, quiesce: true,
+    depth: 6, timeMs: 2400, nodes: 900000, blunder: 0, blunderLoss: 0, noise: 3, quiesce: true,
   },
   l7: {
     id: 'l7', title: '鲸鱼', rating: 2500,
-    depth: 7, timeMs: 3200, nodes: 1200000, blunder: 0, noise: 1, quiesce: true,
+    depth: 7, timeMs: 3200, nodes: 1200000, blunder: 0, blunderLoss: 0, noise: 1, quiesce: true,
   },
   l8: {
     id: 'l8', title: '深渊', rating: 3000,
-    depth: 9, timeMs: 5000, nodes: 2500000, blunder: 0, noise: 0, quiesce: true,
+    depth: 9, timeMs: 5000, nodes: 2500000, blunder: 0, blunderLoss: 0, noise: 0, quiesce: true,
   },
 };
 
@@ -926,38 +926,44 @@ function materialBalance(position) {
   return evaluateWhite(position);
 }
 
-function moveScore(position, move, ply, killers, history) {
-  if (move.captured) {
-    return 2000 + PIECE_VALUE[typeOf(move.captured)] * 8 - PIECE_VALUE[typeOf(move.piece)];
-  }
+function moveScore(move) {
+  if (move.captured) return 2000 + PIECE_VALUE[typeOf(move.captured)] * 8 - PIECE_VALUE[typeOf(move.piece)];
   if (move.promotion) return 1800 + PIECE_VALUE[move.promotion];
-  if (killers[ply] && killers[ply].from === move.from && killers[ply].to === move.to) return 1200;
-  return history[move.from * 128 + move.to] || 0;
+  return 0;
 }
 
-function orderMoves(position, moves, ply, killers, history) {
+function orderMoves(moves, ply, killers, history) {
   return moves
-    .map((move) => ({ move, score: moveScore(position, move, ply, killers, history) }))
+    .map((move) => {
+      let score = moveScore(move);
+      if (killers[ply] && killers[ply].from === move.from && killers[ply].to === move.to) score += 1200;
+      score += history[move.from * 128 + move.to] || 0;
+      return { move, score };
+    })
     .sort((a, b) => b.score - a.score)
     .map((entry) => entry.move);
 }
 
-function quiesce(position, alpha, beta, ctx, depth) {
+function quiesce(position, alpha, beta, ctx, depth, ply) {
   ctx.nodes += 1;
   if (ctx.nodes > ctx.nodesCap || performance.now() > ctx.deadline) {
     ctx.aborted = true;
     return alpha;
   }
-  const stand = evaluate(position);
-  if (stand >= beta) return beta;
-  if (stand > alpha) alpha = stand;
-  if (depth <= 0) return alpha;
   const inCheck = position.inCheck();
-  const moves = position.generateLegal().filter((move) => inCheck || move.captured || move.promotion);
-  const ordered = orderMoves(position, moves, 0, ctx.killers, ctx.history);
+  if (!inCheck) {
+    const stand = evaluate(position);
+    if (stand >= beta) return beta;
+    if (stand > alpha) alpha = stand;
+    if (depth <= 0) return alpha;
+  }
+  const legal = position.generateLegal();
+  const moves = inCheck ? legal : legal.filter((move) => move.captured || move.promotion);
+  if (!moves.length) return inCheck ? -MATE + ply : alpha;
+  const ordered = orderMoves(moves, 0, ctx.killers, ctx.history);
   for (const move of ordered) {
     const undo = position.make(move);
-    const score = -quiesce(position, -beta, -alpha, ctx, depth - 1);
+    const score = -quiesce(position, -beta, -alpha, ctx, depth - 1, ply + 1);
     position.unmake(undo);
     if (ctx.aborted) return alpha;
     if (score >= beta) return beta;
@@ -966,59 +972,29 @@ function quiesce(position, alpha, beta, ctx, depth) {
   return alpha;
 }
 
-function hasNonPawnMaterial(position, color) {
-  for (let sq = 0; sq < 128; sq += 1) {
-    if ((sq & 0x88) !== 0) continue;
-    const piece = position.board[sq];
-    if (piece === 0 || colorOf(piece) !== color) continue;
-    const type = typeOf(piece);
-    if (type === KNIGHT || type === BISHOP || type === ROOK || type === QUEEN) return true;
-  }
-  return false;
-}
-
 function negamax(position, depth, alpha, beta, ply, ctx) {
   ctx.nodes += 1;
   if (ctx.nodes > ctx.nodesCap || ((ctx.nodes & 1023) === 0 && performance.now() > ctx.deadline)) {
     ctx.aborted = true;
     return 0;
   }
-  if (depth <= 0) return quiesce(position, alpha, beta, ctx, 4);
+  if (depth <= 0) return quiesce(position, alpha, beta, ctx, 4, ply);
   const inCheck = position.inCheck();
-  let searchDepth = depth;
-  if (inCheck && searchDepth < 8 && ply < 14) searchDepth += 1;
   const moves = position.generateLegal();
-  if (moves.length === 0) return inCheck ? -MATE + ply : 0;
-
-  if (!inCheck && searchDepth >= 3 && ply > 0 && hasNonPawnMaterial(position, position.turn)) {
-    const nullUndo = position.makeNull();
-    const nullScore = -negamax(position, searchDepth - 3, -beta, -beta + 1, ply + 1, ctx);
-    position.unmakeNull(nullUndo);
-    if (ctx.aborted) return 0;
-    if (nullScore >= beta) return beta;
-  }
-
-  const ordered = orderMoves(position, moves, ply, ctx.killers, ctx.history);
+  if (!moves.length) return inCheck ? -MATE + ply : 0;
+  const ordered = orderMoves(moves, ply, ctx.killers, ctx.history);
   let best = -INF;
-  let searched = 0;
   for (const move of ordered) {
-    const quiet = !move.captured && !move.promotion;
-    let reduction = 0;
-    if (!inCheck && searchDepth >= 3 && quiet && searched >= 4 && !(move.flags & 4)) reduction = 1;
     const undo = position.make(move);
-    let score = -negamax(position, searchDepth - 1 - reduction, -beta, -alpha, ply + 1, ctx);
-    if (reduction && score > alpha && !ctx.aborted) {
-      score = -negamax(position, searchDepth - 1, -beta, -alpha, ply + 1, ctx);
-    }
+    const score = -negamax(position, depth - 1, -beta, -alpha, ply + 1, ctx);
     position.unmake(undo);
     if (ctx.aborted) return best === -INF ? 0 : best;
-    searched += 1;
     if (score > best) best = score;
     if (score > alpha) alpha = score;
     if (alpha >= beta) {
-      if (quiet) {
+      if (!move.captured && !move.promotion) {
         ctx.killers[ply] = move;
-        ctx.history[move.from * 128 + move.to] = (ctx.history[move.from * 128 + move.to] || 0) + searchDepth * searchDepth;
+        ctx.history[move.from * 128 + move.to] = (ctx.history[move.from * 128 + move.to] || 0) + depth * depth;
       }
       break;
     }
@@ -1027,19 +1003,16 @@ function negamax(position, depth, alpha, beta, ply, ctx) {
 }
 
 /**
- * Pick a move for the given level. Synchronous: callers run it in a timer so
- * the panel can paint "thinking" first.
+ * Pick a move for the given level. The search is a plain, exact-window
+ * alpha-beta at the root; legal move ordering only changes speed, never the
+ * score. Low levels make bounded mistakes among the scored root moves, never
+ * a uniform random legal move.
  */
-function chooseMove(position, levelId = 'l4', random = Math.random) {
-  const level = LEVELS[levelId] || LEVELS.l4;
+function chooseMove(position, levelId = 'l5', random = Math.random) {
+  const level = LEVELS[levelId] || LEVELS.l5;
   const legal = position.generateLegal();
   if (!legal.length) return null;
   const started = performance.now();
-  if (level.blunder > 0 && random() < level.blunder) {
-    const move = legal[Math.floor(random() * legal.length)];
-    return { move, score: 0, nodes: 0, depth: 0, ms: Math.round(performance.now() - started), blundered: true };
-  }
-
   const ctx = {
     nodes: 0,
     nodesCap: level.nodes,
@@ -1051,28 +1024,40 @@ function chooseMove(position, levelId = 'l4', random = Math.random) {
   let best = legal[0];
   let bestScore = -INF;
   let completed = 0;
+  let rootScores = [];
 
   for (let depth = 1; depth <= level.depth; depth += 1) {
+    const scored = [];
     let alpha = -INF;
     let localBest = null;
     let localScore = -INF;
-    const ordered = orderMoves(position, legal, 0, ctx.killers, ctx.history);
+    const ordered = orderMoves(legal, 0, ctx.killers, ctx.history);
     for (const move of ordered) {
       const undo = position.make(move);
-      const score = -negamax(position, depth - 1, -INF, -alpha, 1, ctx);
+      // Low levels need exact root scores to choose a bounded mistake.
+      // High levels use the normal root alpha window and can search deeper.
+      const score = -negamax(
+        position,
+        depth - 1,
+        -INF,
+        level.blunder > 0 ? INF : -alpha,
+        1,
+        ctx,
+      );
       position.unmake(undo);
       if (ctx.aborted) break;
-      const noisy = score + (level.noise ? (random() * 2 - 1) * level.noise : 0);
-      if (noisy > localScore) {
-        localScore = noisy;
+      scored.push({ move, score });
+      if (score > alpha) alpha = score;
+      if (score > localScore) {
+        localScore = score;
         localBest = move;
       }
-      if (noisy > alpha) alpha = noisy;
     }
     if (!ctx.aborted && localBest) {
       best = localBest;
       bestScore = localScore;
       completed = depth;
+      rootScores = scored.sort((a, b) => b.score - a.score);
       const index = legal.indexOf(localBest);
       if (index > 0) {
         legal.splice(index, 1);
@@ -1082,13 +1067,24 @@ function chooseMove(position, levelId = 'l4', random = Math.random) {
     if (ctx.aborted) break;
   }
 
+  let blundered = false;
+  if (completed && level.blunder > 0 && rootScores.length > 1 && random() < level.blunder) {
+    const top = rootScores[0].score;
+    const mistakes = rootScores.slice(1).filter((entry) => top - entry.score <= level.blunderLoss);
+    if (mistakes.length) {
+      const picked = mistakes[Math.floor(random() * mistakes.length)].move;
+      blundered = picked !== best;
+      best = picked;
+    }
+  }
+
   return {
     move: best,
     score: bestScore,
     nodes: ctx.nodes,
     depth: completed,
     ms: Math.round(performance.now() - started),
-    blundered: false,
+    blundered,
   };
 }
 
@@ -1211,6 +1207,8 @@ const T = {
   herQueenCapture: { _: ['你的后，我收下啦。棋还没结束，我们继续。', '吃到后啦。下一步也得认真看。'], smug: ['哼哼，这个后归我啦。我有点得意了。'], surprised: ['欸，我吃到你的后啦。让我再看一眼棋盘。'] },
   drawOffer: { _: ['用户想和棋呀？让我看看现在的局面。', '收到提和。我想一小会儿。'] },
   drawRefuse: { _: ['这盘我还想接着下，可以再陪我走几步吗？', '唔，现在先不和啦。我还想试试别的走法。', '我还想认真下完这一盘。我们继续吧。'], smug: ['哼哼，我还有小计划呢。先不和啦。'], pout: ['唔，还没下够呢。再陪我走几步嘛。'] },
+  drawAsk: { _: ['这局有点胶着。要不要和棋？', '再下下去要半夜了，和了吧？', '我看局面差不多了，和棋收场？'], thinking: ['让我算一下……嗯，和棋也许不错。'], smug: ['要不要和棋？我觉得这样对你比较体面。'] },
+  drawDecline: { _: ['行，那继续。', '好吧，我陪你下完。', '不干就不干，我还没输。'], pout: ['哼，那继续。'], smile: ['好，继续下。'] },
   poke: {
     _: ['呀，怎么突然戳我。我有在陪你呀。', '欸？我在呢。你是不是想让我看看你？', '会痒啦。好啦，我看到你了。', '再戳要收费了哦……一盘棋就好。'],
     love: ['你、你突然靠过来，我会害羞的。', '好啦，知道你在。我也在呀。', '再陪你待一会儿。就一会儿哦。'],
@@ -1253,7 +1251,7 @@ const EN = {
   win: ['I won! Thank you for the game.', 'This one is mine. May I be a little pleased?'], lose: ['You won. Well played!', 'A little disappointed... but I would love another game.'], draw: ['A draw. I enjoyed playing with you.', 'We both held on. Another game?'], rematch: ['Yes! Let us play again.'],
   promotion: ['Your pawn became a {promotion}!'], herPromotion: ['My pawn became a {promotion}!'], castle: ['You castled. A little shelter for your king.'], herCastle: ['I castled. My king has a little shelter now.'],
   enPassant: ['En passant! You remembered that rule.'], herEnPassant: ['I take that pawn en passant. Your turn!'], queenCapture: ['Ah, my queen! I need to be careful now.'], herQueenCapture: ['I took your queen. Let us keep playing carefully.'],
-  drawOffer: ['A draw offer? Let me look at the position.'], drawRefuse: ['I would like to play on a little longer.', 'Not yet. I still have a little plan.'], poke: ['Ah! That tickles.', 'I am here. Did you want my attention?', 'One more poke costs one more game!'],
+  drawOffer: ['A draw offer? Let me look at the position.'], drawRefuse: ['I would like to play on a little longer.', 'Not yet. I still have a little plan.'], drawAsk: ['This is quite closed. Shall we call it a draw?', 'It is getting late. Draw?', 'I think we are evenly matched. Draw?'], drawDecline: ['Fine, we play on.', 'Okay, let us finish this.', 'No draw, then. I am not losing yet.'], poke: ['Ah! That tickles.', 'I am here. Did you want my attention?', 'One more poke costs one more game!'],
   firstCapture: ['You took the first piece, my {captured}!'], herFirstCapture: ['I took the first piece, your {captured}!'], firstCheck: ['Your first check! Let me think carefully.'], herFirstCheck: ['My first check! Take your time.'], queenTrade: ['Both queens have left the board. We play on.'],
   underpromotion: ['You chose a {promotion}! An interesting choice.'], herUnderpromotion: ['I chose a {promotion}. A little change of plan.'], comeback: ['You turned the position around. Nicely fought!'], herComeback: ['I managed to turn things around. I need to stay focused.'],
   blunderStreak: ['A few things slipped by. Want to rest your eyes?'], longGameSpecial: ['Fifty full moves together! Remember to have some water.'], lowMaterialSpecial: ['The endgame is here. Let us play it carefully.'], threefold: ['The same position three times. A draw by repetition.'], fiftyMove: ['Fifty moves without a capture or pawn move. A draw.'],
@@ -1384,7 +1382,7 @@ const EVENT_MOODS = {
   playerCheck: ['surprised', 'panic', 'determined'], herCheck: ['smug', 'wink', 'determined'], playerBlunder: ['laugh', 'smug', 'surprised', 'thinking'], playerGood: ['panic', 'panic', 'surprised', 'determined', 'love'], herBlunder: ['sad', 'sad', 'embarrassed', 'pout'], herGood: ['smug', 'smug', 'wink', 'determined', 'smile'], opening: ['thinking', 'calm', 'smug'],
   queenCapture: ['panic', 'pout', 'angry'], herQueenCapture: ['smug', 'surprised', 'wink'], firstCapture: ['surprised', 'pout'], herFirstCapture: ['smile', 'smug'], firstCheck: ['panic', 'determined'], herFirstCheck: ['wink', 'smug'],
   queenTrade: ['calm', 'surprised', 'determined'], underpromotion: ['surprised', 'thinking'], herUnderpromotion: ['wink', 'determined'], comeback: ['surprised', 'determined'], herComeback: ['smile', 'determined'], blunderStreak: ['thinking', 'smile'], lowMaterialSpecial: ['determined', 'thinking'],
-  longGameSpecial: ['tired', 'smile'], longGame: ['tired', 'sleepy'], playerThinkLong: ['calm', 'smile'], herThink: ['thinking'], undo: ['smile', 'pout', 'calm'], drawOffer: ['thinking'], drawRefuse: ['pout', 'smile'],
+  longGameSpecial: ['tired', 'smile'], longGame: ['tired', 'sleepy'], playerThinkLong: ['calm', 'smile'], herThink: ['thinking'], undo: ['smile', 'pout', 'calm'], drawOffer: ['thinking'], drawRefuse: ['pout', 'smile'], drawAsk: ['thinking', 'calm', 'smug'], drawDecline: ['pout', 'smile', 'calm'],
   resign: ['smile', 'calm'], win: ['smug', 'laugh', 'wink', 'love'], lose: ['sad', 'cry', 'pout'], draw: ['calm', 'smile', 'pout'], lowMaterial: ['thinking', 'determined'], promotion: ['surprised', 'determined'], castle: ['calm', 'smile'], enPassant: ['surprised', 'wink'],
 };
 function avoidRecent(pool, recent, random) {
@@ -1521,9 +1519,45 @@ function selectSpecial(game, move, san, before, after, playerColor, facts, used)
   return candidates.find((key) => !used.has(key)) || null;
 }
 
-function acceptsDraw(evalWhite, playerColor, random = Math.random) {
+/** Closed-ish position: many pawns, few open files and at least two locked files. */
+function isClosedPosition(position) {
+  const files = Array.from({ length: 8 }, () => ({ w: 0, b: 0 }));
+  let pawns = 0;
+  for (let sq = 0; sq < 128; sq += 1) {
+    if (sq & 0x88) continue;
+    const piece = position.board[sq];
+    if (!piece || typeOf(piece) !== PAWN) continue;
+    const file = sq & 15;
+    if ((piece & 8) === 0) files[file].w += 1;
+    else files[file].b += 1;
+    pawns += 1;
+  }
+  let openFiles = 0;
+  let blockedFiles = 0;
+  for (const file of files) {
+    if (!file.w && !file.b) openFiles += 1;
+    if (file.w && file.b) blockedFiles += 1;
+  }
+  return pawns >= 10 && openFiles <= 3 && blockedFiles >= 2;
+}
+
+/** Her draw decision. Equal and closed positions are no longer an automatic no. */
+function acceptsDraw(evalWhite, playerColor, random = Math.random, position = null) {
   const herScore = evalWhite * (playerColor === 'white' ? -1 : 1);
-  return herScore < -280 && random() < 0.7;
+  const closed = position ? isClosedPosition(position) : false;
+  if (herScore < -280) return random() < 0.7;
+  if (Math.abs(herScore) <= 120) return random() < (closed ? 0.38 : 0.28);
+  if (herScore > 280) return random() < (closed ? 0.05 : 0.01);
+  return random() < (closed ? 0.15 : 0.06);
+}
+
+/** Whether she should proactively offer a draw after her own move. */
+function shouldOfferDraw(position, evalWhite, playerColor, historyLength, random = Math.random) {
+  if (historyLength < 20) return false;
+  const herScore = evalWhite * (playerColor === 'white' ? -1 : 1);
+  if (herScore < -160 || herScore > 180) return false;
+  const chance = isClosedPosition(position) ? 0.16 : 0.09;
+  return random() < chance;
 }
 
 /** Keep a line and its portrait together until the reader has time to read it.
@@ -1643,13 +1677,30 @@ const zh = {
   'btn.rematch': '再来一局',
   'btn.cancel': '取消',
   'btn.confirm': '确定',
+  'btn.restart': '重开',
+  'btn.resignNow': '认输',
+  'btn.review': '查看棋谱',
   'btn.reset': '重置',
-  'confirm.new': '重开一局？当前进度会丢失。',
+  'confirm.new': '重开一局？',
+  'confirm.newDesc': '当前棋局和棋谱会被清空。',
+  'confirm.newNote': '新局会立即开始。',
   'confirm.resign': '确定认输？',
+  'confirm.resignDesc': '这一局会记为 DeepSeek 获胜。',
+  'confirm.resignNote': '认输后仍可在结果页再来一局。',
   'confirm.draw': '向 DeepSeek 提和？',
   'confirm.drawNote': '她可以拒绝。领先或均势时，她多半不会答应。',
+  'confirm.drawHint': '提和后她会短暂考虑。',
   'btn.offerDraw': '提和',
+  'result.kicker': '对局结束',
+  'result.settings': '下一局设置',
+  'result.moves': '本局 {n} 手',
   'draw.thinking': '让我想想……',
+  'draw.incomingTitle': 'DeepSeek 想和棋',
+  'draw.incomingDesc': '局面有点胶着，她主动提出和棋。',
+  'draw.incomingNote': '接受后本局记为和棋；拒绝则继续下。',
+  'btn.acceptDraw': '接受和棋',
+  'btn.declineDraw': '继续下',
+  'toast.drawDeclined': '你拒绝了和棋',
   'confirm.reset': '清空战绩？',
   'diff.easy': '摸鱼',
   'diff.normal': '陪练',
@@ -1729,13 +1780,30 @@ const en = {
   'btn.rematch': 'Rematch',
   'btn.cancel': 'Cancel',
   'btn.confirm': 'OK',
+  'btn.restart': 'Restart',
+  'btn.resignNow': 'Resign',
+  'btn.review': 'Review moves',
   'btn.reset': 'Reset',
-  'confirm.new': 'Start a new game? Current progress will be lost.',
+  'confirm.new': 'Start a new game?',
+  'confirm.newDesc': 'The current position and move list will be cleared.',
+  'confirm.newNote': 'The new game starts immediately.',
   'confirm.resign': 'Resign this game?',
+  'confirm.resignDesc': 'This game will be recorded as a win for DeepSeek.',
+  'confirm.resignNote': 'You can still rematch from the result screen.',
   'confirm.draw': 'Offer a draw?',
   'confirm.drawNote': 'She can decline. If she is ahead or level, she probably will.',
+  'confirm.drawHint': 'She will take a short moment to decide.',
   'btn.offerDraw': 'Offer draw',
+  'result.kicker': 'Game over',
+  'result.settings': 'Next game settings',
+  'result.moves': '{n} moves',
   'draw.thinking': 'Let me think...',
+  'draw.incomingTitle': 'DeepSeek offers a draw',
+  'draw.incomingDesc': 'The position is closed. She is offering a draw.',
+  'draw.incomingNote': 'Accept to record a draw; decline to play on.',
+  'btn.acceptDraw': 'Accept draw',
+  'btn.declineDraw': 'Play on',
+  'toast.drawDeclined': 'You declined the draw',
   'confirm.reset': 'Clear your record?',
   'diff.easy': 'Easy',
   'diff.normal': 'Normal',
@@ -1975,11 +2043,15 @@ body[data-theme="light"] .dc-root,
 .dc-stats{background:var(--dc-bg-track);border:2px solid var(--dc-border-soft);padding:8px;margin-top:6px;color:var(--dc-text)}
 .dc-overlay-actions{display:flex;gap:6px;padding:8px;border-top:2px solid var(--dc-border-soft);background:var(--dc-bg-deep)}
 .dc-overlay-actions .dc-btn{flex:1}
-.dc-draw-wrap{min-height:100%;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box}
-.dc-draw-card{display:flex;gap:12px;align-items:center;background:var(--dc-bg-panel);border:2px solid var(--dc-border);box-shadow:4px 4px 0 var(--dc-shadow);padding:12px;max-width:320px}
-.dc-draw-mark{width:48px;height:48px;flex:0 0 48px;display:grid;place-items:center;background:var(--dc-paper);color:var(--dc-ink);border:2px solid var(--dc-ink);font-size:24px;line-height:1}
-.dc-draw-title{color:var(--dc-title);line-height:1.5}
-.dc-draw-desc{color:var(--dc-text-dim);line-height:1.55;margin-top:4px}
+.dc-confirm-wrap{min-height:100%;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box}
+.dc-confirm-card{display:flex;gap:12px;align-items:flex-start;background:var(--dc-bg-panel);border:2px solid var(--dc-border);box-shadow:5px 5px 0 var(--dc-shadow);padding:14px;max-width:340px}
+.dc-confirm-mark{width:48px;height:48px;flex:0 0 48px;display:grid;place-items:center;background:var(--dc-paper);color:var(--dc-ink);border:2px solid var(--dc-ink);font-size:24px;line-height:1}
+.dc-confirm-card.new .dc-confirm-mark{background:var(--dc-gold);color:var(--dc-gold-ink);border-color:var(--dc-gold-border)}
+.dc-confirm-card.resign .dc-confirm-mark{background:var(--dc-danger);color:#fff;border-color:var(--dc-danger)}
+.dc-confirm-copy{min-width:0}
+.dc-confirm-title{color:var(--dc-title);line-height:1.45}
+.dc-confirm-desc{color:var(--dc-text-dim);line-height:1.55;margin-top:4px}
+.dc-confirm-note{color:var(--dc-text-muted);font-size:12px;line-height:1.5;margin-top:6px;border-top:1px dashed var(--dc-border-soft);padding-top:5px}
 
 .dc-promo{position:absolute;inset:0;z-index:40;background:rgba(6,10,18,.82);display:grid;place-items:center;padding:12px}
 .dc-promo-card{background:var(--dc-paper);color:var(--dc-ink);border:2px solid var(--dc-ink);box-shadow:4px 4px 0 var(--dc-shadow);padding:10px;width:100%;max-width:260px}
@@ -1989,10 +2061,24 @@ body[data-theme="light"] .dc-root,
 .dc-promo-grid img{width:44px;height:44px;object-fit:contain;image-rendering:pixelated}
 .dc-promo-grid span{font-size:12px}
 
-.dc-result{position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(6,10,18,.74);padding:16px;text-align:center}
-.dc-result-title{font-size:24px;color:var(--dc-title);text-shadow:2px 2px 0 var(--dc-shadow)}
-.dc-result-sub{color:var(--dc-text-dim);max-width:240px}
-.dc-result .dc-btn{padding:7px 18px}
+.dc-result{position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;background:rgba(6,10,18,.78);padding:10px;overflow:auto}
+.dc-result-sheet{width:100%;max-width:400px;max-height:100%;overflow:auto;background:var(--dc-bg-deep);border:2px solid var(--dc-border);box-shadow:6px 6px 0 var(--dc-shadow);padding:14px;box-sizing:border-box}
+.dc-result-kicker{color:var(--dc-gold);font-size:12px;letter-spacing:2px;margin-bottom:4px}
+.dc-result-title{font-size:24px;line-height:1.3;color:var(--dc-title);text-shadow:2px 2px 0 var(--dc-shadow)}
+.dc-result-sub{color:var(--dc-text-dim);line-height:1.55;margin-top:6px}
+.dc-result-meta{color:var(--dc-text-muted);font-size:12px;line-height:1.5;margin-top:6px}
+.dc-result-section{border-top:1px solid var(--dc-border-soft);margin-top:12px;padding-top:10px}
+.dc-result-section-title{color:var(--dc-gold);font-size:12px;letter-spacing:1px}
+.dc-result-diff{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin:7px 0}
+.dc-result-diff button{background:var(--dc-bg-panel);color:var(--dc-text);border:2px solid var(--dc-border);padding:4px 0;cursor:pointer;font:inherit;font-size:12px}
+.dc-result-diff button.on{background:var(--dc-gold);color:var(--dc-gold-ink);border-color:var(--dc-gold-border)}
+.dc-result-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px dashed var(--dc-border-soft)}
+.dc-result-row-label{color:var(--dc-text-dim);flex:0 0 auto}
+.dc-result-seg{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
+.dc-result-seg button{background:var(--dc-bg-panel);color:var(--dc-text);border:2px solid var(--dc-border);padding:3px 7px;cursor:pointer;font:inherit;font-size:12px}
+.dc-result-seg button.on{background:var(--dc-gold);color:var(--dc-gold-ink);border-color:var(--dc-gold-border)}
+.dc-result-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:12px}
+.dc-result-actions .dc-btn{padding:7px 0}
 
 .dc-toast{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);background:var(--dc-bg-track);border:2px solid var(--dc-border);color:var(--dc-text);padding:4px 10px;z-index:50;white-space:nowrap;animation:dc-fade .12s steps(2)}
 .dc-shake{animation:dc-shake .28s steps(2)}
@@ -2042,7 +2128,7 @@ body[data-theme="light"] .dc-root,
 
 
 const PIECE_KEY = ['', 'p', 'n', 'b', 'r', 'q', 'k'];
-const BUILD_VERSION = '0.6.0';
+const BUILD_VERSION = '0.7.0';
 const SAVE_KEY = 'deepchess.save.v1';
 const SETTINGS_KEY = 'deepchess.settings.v2';
 const STATS_KEY = 'deepchess.stats.v1';
@@ -2330,6 +2416,7 @@ function DeepChessPanel(props) {
   const [anim, setAnim] = React.useState(null);
   const [boardShake, setBoardShake] = React.useState(false);
   const [drawPending, setDrawPending] = React.useState(false);
+  const [incomingDraw, setIncomingDraw] = React.useState(false);
   const boardRef = React.useRef(null);
   const animTimer = React.useRef(null);
   const drawTimer = React.useRef(null);
@@ -2351,6 +2438,7 @@ function DeepChessPanel(props) {
   const idleSaidRef = React.useRef(false);
   const speechDirectorRef = React.useRef(null);
   const openingSaidRef = React.useRef('');
+  const drawOfferedRef = React.useRef(false);
   const lowSaidRef = React.useRef(false);
   const longSaidRef = React.useRef(false);
   if (!speechDirectorRef.current) speechDirectorRef.current = new SpeechDirector(showSpeech);
@@ -2698,6 +2786,8 @@ function DeepChessPanel(props) {
     factsRef.current = { blunders: 0, blunderStreak: 0, undos: 0 };
     specialRef.current = new Set();
     openingSaidRef.current = '';
+    drawOfferedRef.current = false;
+    setIncomingDraw(false);
     lowSaidRef.current = false;
     longSaidRef.current = false;
     speechDirectorRef.current.reset();
@@ -2727,7 +2817,7 @@ function DeepChessPanel(props) {
       setDrawPending(false);
       return;
     }
-    const accept = acceptsDraw(evaluateWhite(game.position), playerColor);
+    const accept = acceptsDraw(evaluateWhite(game.position), playerColor, Math.random, game.position);
     if (accept) {
       finish({ state: 'draw', winner: null, reason: 'agreement' }, 'agreement');
     } else {
@@ -2738,7 +2828,7 @@ function DeepChessPanel(props) {
 
   function offerDraw() {
     setConfirm(null);
-    if (over || thinking || drawPending) return;
+    if (over || thinking || drawPending || incomingDraw) return;
     setDrawPending(true);
     speechDirectorRef.current.reset();
     say('drawOffer', {}, 'thinking', true);
@@ -2747,6 +2837,27 @@ function DeepChessPanel(props) {
       setDrawPending(false);
       resolveDraw();
     }, 760);
+  }
+
+  function acceptIncomingDraw() {
+    setIncomingDraw(false);
+    if (over) return;
+    finish({ state: 'draw', winner: null, reason: 'agreement' }, 'agreement');
+  }
+
+  function declineIncomingDraw() {
+    setIncomingDraw(false);
+    say('drawDecline', {}, 'pout', true);
+    showToast(t('toast.drawDeclined'));
+  }
+
+  function maybeOfferDraw() {
+    if (over || incomingDraw || drawPending || menu || confirm || pendingPromo || drawOfferedRef.current) return;
+    if (game.turn !== playerTurn || game.inCheck()) return;
+    if (!shouldOfferDraw(game.position, evaluateWhite(game.position), playerColor, game.history.length)) return;
+    drawOfferedRef.current = true;
+    setIncomingDraw(true);
+    say('drawAsk', {}, 'thinking', true);
   }
 
   React.useEffect(() => {
@@ -2812,6 +2923,7 @@ function DeepChessPanel(props) {
           if (!maybeOpening(ctx, event)) say(event, ctx);
         }
         maybeStateComment();
+        maybeOfferDraw();
         persist();
       } catch (error) {
         setThinking(false);
@@ -2896,6 +3008,23 @@ function DeepChessPanel(props) {
     else if (final.reason === 'resign') resultTitle = t('result.resign');
     else resultTitle = final.winner === playerColor ? t('result.win') : t('result.lose');
   }
+
+  const confirmMeta = confirm === 'new'
+    ? {
+      mark: '新', tone: 'new', title: t('confirm.new'), desc: t('confirm.newDesc'), note: t('confirm.newNote'),
+      button: t('btn.restart'), action: () => { setConfirm(null); startNew(); },
+    }
+    : confirm === 'resign'
+      ? {
+        mark: '认', tone: 'resign', title: t('confirm.resign'), desc: t('confirm.resignDesc'), note: t('confirm.resignNote'),
+        button: t('btn.resignNow'), action: resign,
+      }
+      : confirm === 'draw'
+        ? {
+          mark: '和', tone: 'draw', title: t('confirm.draw'), desc: t('confirm.drawNote'), note: t('confirm.drawHint'),
+          button: t('btn.offerDraw'), action: offerDraw,
+        }
+        : null;
 
   return React.createElement('div', { className: 'dc-root' },
     React.createElement('div', { className: 'dc-head' },
@@ -2992,32 +3121,85 @@ function DeepChessPanel(props) {
         .replace('{wins}', stats.wins)
         .replace('{losses}', stats.losses)
         .replace('{draws}', stats.draws))),
-    confirm
+    confirmMeta
       ? React.createElement('div', { className: 'dc-overlay', style: { zIndex: 35 } },
         React.createElement('div', { className: 'dc-sheet-body' },
-          confirm === 'draw'
-            ? React.createElement('div', { className: 'dc-draw-wrap' },
-              React.createElement('div', { className: 'dc-draw-card' },
-                React.createElement('div', { className: 'dc-draw-mark' }, '和'),
-                React.createElement('div', { className: 'dc-draw-copy' },
-                  React.createElement('div', { className: 'dc-draw-title' }, t('confirm.draw')),
-                  React.createElement('div', { className: 'dc-draw-desc' }, t('confirm.drawNote')))))
-            : React.createElement('div', { className: 'dc-row' },
-              React.createElement('div', { className: 'dc-row-label' },
-                confirm === 'new' ? t('confirm.new') : confirm === 'resign' ? t('confirm.resign') : t('confirm.reset')))),
+          React.createElement('div', { className: 'dc-confirm-wrap' },
+            React.createElement('div', { className: `dc-confirm-card ${confirmMeta.tone}` },
+              React.createElement('div', { className: 'dc-confirm-mark' }, confirmMeta.mark),
+              React.createElement('div', { className: 'dc-confirm-copy' },
+                React.createElement('div', { className: 'dc-confirm-title' }, confirmMeta.title),
+                React.createElement('div', { className: 'dc-confirm-desc' }, confirmMeta.desc),
+                React.createElement('div', { className: 'dc-confirm-note' }, confirmMeta.note))))),
         React.createElement('div', { className: 'dc-overlay-actions' },
           React.createElement('button', { type: 'button', className: 'dc-btn', onClick: () => setConfirm(null) }, t('btn.cancel')),
           React.createElement('button', {
             type: 'button',
-            className: confirm === 'resign' ? 'dc-btn red' : 'dc-btn gold',
-            onClick: confirm === 'new' ? () => { setConfirm(null); startNew(); } : confirm === 'resign' ? resign : offerDraw,
-          }, confirm === 'draw' ? t('btn.offerDraw') : t('btn.confirm'))))
+            className: confirmMeta.tone === 'resign' ? 'dc-btn red' : 'dc-btn gold',
+            onClick: confirmMeta.action,
+          }, confirmMeta.button)))
+      : null,
+    incomingDraw
+      ? React.createElement('div', { className: 'dc-overlay', style: { zIndex: 36 } },
+        React.createElement('div', { className: 'dc-sheet-body' },
+          React.createElement('div', { className: 'dc-confirm-wrap' },
+            React.createElement('div', { className: 'dc-confirm-card draw' },
+              React.createElement('div', { className: 'dc-confirm-mark' }, '和'),
+              React.createElement('div', { className: 'dc-confirm-copy' },
+                React.createElement('div', { className: 'dc-confirm-title' }, t('draw.incomingTitle')),
+                React.createElement('div', { className: 'dc-confirm-desc' }, t('draw.incomingDesc')),
+                React.createElement('div', { className: 'dc-confirm-note' }, t('draw.incomingNote')))))),
+        React.createElement('div', { className: 'dc-overlay-actions' },
+          React.createElement('button', { type: 'button', className: 'dc-btn', onClick: declineIncomingDraw }, t('btn.declineDraw')),
+          React.createElement('button', { type: 'button', className: 'dc-btn gold', onClick: acceptIncomingDraw }, t('btn.acceptDraw'))))
       : null,
     over && !menu
       ? React.createElement('div', { className: 'dc-result' },
-        React.createElement('div', { className: 'dc-result-title' }, resultTitle),
-        React.createElement('div', { className: 'dc-result-sub' }, speech),
-        React.createElement('button', { type: 'button', className: 'dc-btn gold', onClick: startNew }, t('btn.rematch')))
+        React.createElement('div', { className: 'dc-result-sheet' },
+          React.createElement('div', { className: 'dc-result-kicker' }, t('result.kicker')),
+          React.createElement('div', { className: 'dc-result-title' }, resultTitle),
+          React.createElement('div', { className: 'dc-result-sub' }, speech),
+          React.createElement('div', { className: 'dc-result-meta' },
+            `${t('result.moves').replace('{n}', Math.ceil(game.history.length / 2))} · ${t('set.stats.value')
+              .replace('{wins}', stats.wins).replace('{losses}', stats.losses).replace('{draws}', stats.draws)}`),
+          React.createElement('div', { className: 'dc-result-section' },
+            React.createElement('div', { className: 'dc-result-section-title' }, t('result.settings')),
+            React.createElement('div', { className: 'dc-result-diff' },
+              LEVEL_ORDER.map((id) => React.createElement('button', {
+                key: id,
+                type: 'button',
+                className: settings.difficulty === id ? 'on' : '',
+                onClick: () => changeDifficulty(id),
+                title: `${t(`diff.${id}`)} · ${LEVELS[id].rating}`,
+              }, t(`diff.${id}`)))),
+            React.createElement('div', { className: 'dc-result-row' },
+              React.createElement('span', { className: 'dc-result-row-label' }, t('set.side')),
+              React.createElement('div', { className: 'dc-result-seg' },
+                ['white', 'black'].map((side) => React.createElement('button', {
+                  key: side,
+                  type: 'button',
+                  className: settings.playerColor === side ? 'on' : '',
+                  onClick: () => setSettings((value) => ({ ...value, playerColor: side })),
+                }, t(`side.${side}`))))),
+            React.createElement('div', { className: 'dc-result-row' },
+              React.createElement('span', { className: 'dc-result-row-label' }, t('set.sound')),
+              React.createElement('button', {
+                type: 'button',
+                className: `dc-btn${settings.sound ? ' gold' : ''}`,
+                onClick: toggleSound,
+              }, settings.sound ? 'ON' : 'OFF')),
+            React.createElement('div', { className: 'dc-result-row' },
+              React.createElement('span', { className: 'dc-result-row-label' }, t('set.banter')),
+              React.createElement('div', { className: 'dc-result-seg' },
+                ['quiet', 'normal', 'chatty'].map((mode) => React.createElement('button', {
+                  key: mode,
+                  type: 'button',
+                  className: settings.banter === mode ? 'on' : '',
+                  onClick: () => setSettings((value) => ({ ...value, banter: mode })),
+                }, t(`banter.${mode}`)))))),
+          React.createElement('div', { className: 'dc-result-actions' },
+            React.createElement('button', { type: 'button', className: 'dc-btn gold', onClick: startNew }, t('btn.rematch')),
+            React.createElement('button', { type: 'button', className: 'dc-btn', onClick: () => setMenu('moves') }, t('btn.review')))))
       : null,
     pendingPromo
       ? React.createElement('div', { className: 'dc-promo' },

@@ -105,6 +105,8 @@ const T = {
   herQueenCapture: { _: ['你的后，我收下啦。棋还没结束，我们继续。', '吃到后啦。下一步也得认真看。'], smug: ['哼哼，这个后归我啦。我有点得意了。'], surprised: ['欸，我吃到你的后啦。让我再看一眼棋盘。'] },
   drawOffer: { _: ['用户想和棋呀？让我看看现在的局面。', '收到提和。我想一小会儿。'] },
   drawRefuse: { _: ['这盘我还想接着下，可以再陪我走几步吗？', '唔，现在先不和啦。我还想试试别的走法。', '我还想认真下完这一盘。我们继续吧。'], smug: ['哼哼，我还有小计划呢。先不和啦。'], pout: ['唔，还没下够呢。再陪我走几步嘛。'] },
+  drawAsk: { _: ['这局有点胶着。要不要和棋？', '再下下去要半夜了，和了吧？', '我看局面差不多了，和棋收场？'], thinking: ['让我算一下……嗯，和棋也许不错。'], smug: ['要不要和棋？我觉得这样对你比较体面。'] },
+  drawDecline: { _: ['行，那继续。', '好吧，我陪你下完。', '不干就不干，我还没输。'], pout: ['哼，那继续。'], smile: ['好，继续下。'] },
   poke: {
     _: ['呀，怎么突然戳我。我有在陪你呀。', '欸？我在呢。你是不是想让我看看你？', '会痒啦。好啦，我看到你了。', '再戳要收费了哦……一盘棋就好。'],
     love: ['你、你突然靠过来，我会害羞的。', '好啦，知道你在。我也在呀。', '再陪你待一会儿。就一会儿哦。'],
@@ -147,7 +149,7 @@ const EN = {
   win: ['I won! Thank you for the game.', 'This one is mine. May I be a little pleased?'], lose: ['You won. Well played!', 'A little disappointed... but I would love another game.'], draw: ['A draw. I enjoyed playing with you.', 'We both held on. Another game?'], rematch: ['Yes! Let us play again.'],
   promotion: ['Your pawn became a {promotion}!'], herPromotion: ['My pawn became a {promotion}!'], castle: ['You castled. A little shelter for your king.'], herCastle: ['I castled. My king has a little shelter now.'],
   enPassant: ['En passant! You remembered that rule.'], herEnPassant: ['I take that pawn en passant. Your turn!'], queenCapture: ['Ah, my queen! I need to be careful now.'], herQueenCapture: ['I took your queen. Let us keep playing carefully.'],
-  drawOffer: ['A draw offer? Let me look at the position.'], drawRefuse: ['I would like to play on a little longer.', 'Not yet. I still have a little plan.'], poke: ['Ah! That tickles.', 'I am here. Did you want my attention?', 'One more poke costs one more game!'],
+  drawOffer: ['A draw offer? Let me look at the position.'], drawRefuse: ['I would like to play on a little longer.', 'Not yet. I still have a little plan.'], drawAsk: ['This is quite closed. Shall we call it a draw?', 'It is getting late. Draw?', 'I think we are evenly matched. Draw?'], drawDecline: ['Fine, we play on.', 'Okay, let us finish this.', 'No draw, then. I am not losing yet.'], poke: ['Ah! That tickles.', 'I am here. Did you want my attention?', 'One more poke costs one more game!'],
   firstCapture: ['You took the first piece, my {captured}!'], herFirstCapture: ['I took the first piece, your {captured}!'], firstCheck: ['Your first check! Let me think carefully.'], herFirstCheck: ['My first check! Take your time.'], queenTrade: ['Both queens have left the board. We play on.'],
   underpromotion: ['You chose a {promotion}! An interesting choice.'], herUnderpromotion: ['I chose a {promotion}. A little change of plan.'], comeback: ['You turned the position around. Nicely fought!'], herComeback: ['I managed to turn things around. I need to stay focused.'],
   blunderStreak: ['A few things slipped by. Want to rest your eyes?'], longGameSpecial: ['Fifty full moves together! Remember to have some water.'], lowMaterialSpecial: ['The endgame is here. Let us play it carefully.'], threefold: ['The same position three times. A draw by repetition.'], fiftyMove: ['Fifty moves without a capture or pawn move. A draw.'],
@@ -278,7 +280,7 @@ const EVENT_MOODS = {
   playerCheck: ['surprised', 'panic', 'determined'], herCheck: ['smug', 'wink', 'determined'], playerBlunder: ['laugh', 'smug', 'surprised', 'thinking'], playerGood: ['panic', 'panic', 'surprised', 'determined', 'love'], herBlunder: ['sad', 'sad', 'embarrassed', 'pout'], herGood: ['smug', 'smug', 'wink', 'determined', 'smile'], opening: ['thinking', 'calm', 'smug'],
   queenCapture: ['panic', 'pout', 'angry'], herQueenCapture: ['smug', 'surprised', 'wink'], firstCapture: ['surprised', 'pout'], herFirstCapture: ['smile', 'smug'], firstCheck: ['panic', 'determined'], herFirstCheck: ['wink', 'smug'],
   queenTrade: ['calm', 'surprised', 'determined'], underpromotion: ['surprised', 'thinking'], herUnderpromotion: ['wink', 'determined'], comeback: ['surprised', 'determined'], herComeback: ['smile', 'determined'], blunderStreak: ['thinking', 'smile'], lowMaterialSpecial: ['determined', 'thinking'],
-  longGameSpecial: ['tired', 'smile'], longGame: ['tired', 'sleepy'], playerThinkLong: ['calm', 'smile'], herThink: ['thinking'], undo: ['smile', 'pout', 'calm'], drawOffer: ['thinking'], drawRefuse: ['pout', 'smile'],
+  longGameSpecial: ['tired', 'smile'], longGame: ['tired', 'sleepy'], playerThinkLong: ['calm', 'smile'], herThink: ['thinking'], undo: ['smile', 'pout', 'calm'], drawOffer: ['thinking'], drawRefuse: ['pout', 'smile'], drawAsk: ['thinking', 'calm', 'smug'], drawDecline: ['pout', 'smile', 'calm'],
   resign: ['smile', 'calm'], win: ['smug', 'laugh', 'wink', 'love'], lose: ['sad', 'cry', 'pout'], draw: ['calm', 'smile', 'pout'], lowMaterial: ['thinking', 'determined'], promotion: ['surprised', 'determined'], castle: ['calm', 'smile'], enPassant: ['surprised', 'wink'],
 };
 function avoidRecent(pool, recent, random) {

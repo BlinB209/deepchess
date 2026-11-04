@@ -1,4 +1,4 @@
-import { Position, typeOf } from './engine.js';
+import { PAWN, Position, typeOf } from './engine.js';
 import { evaluateWhite } from './ai.js';
 
 /** Compare a move with alternatives, including the opponent's immediate reply.
@@ -107,9 +107,45 @@ export function selectSpecial(game, move, san, before, after, playerColor, facts
   return candidates.find((key) => !used.has(key)) || null;
 }
 
-export function acceptsDraw(evalWhite, playerColor, random = Math.random) {
+/** Closed-ish position: many pawns, few open files and at least two locked files. */
+export function isClosedPosition(position) {
+  const files = Array.from({ length: 8 }, () => ({ w: 0, b: 0 }));
+  let pawns = 0;
+  for (let sq = 0; sq < 128; sq += 1) {
+    if (sq & 0x88) continue;
+    const piece = position.board[sq];
+    if (!piece || typeOf(piece) !== PAWN) continue;
+    const file = sq & 15;
+    if ((piece & 8) === 0) files[file].w += 1;
+    else files[file].b += 1;
+    pawns += 1;
+  }
+  let openFiles = 0;
+  let blockedFiles = 0;
+  for (const file of files) {
+    if (!file.w && !file.b) openFiles += 1;
+    if (file.w && file.b) blockedFiles += 1;
+  }
+  return pawns >= 10 && openFiles <= 3 && blockedFiles >= 2;
+}
+
+/** Her draw decision. Equal and closed positions are no longer an automatic no. */
+export function acceptsDraw(evalWhite, playerColor, random = Math.random, position = null) {
   const herScore = evalWhite * (playerColor === 'white' ? -1 : 1);
-  return herScore < -280 && random() < 0.7;
+  const closed = position ? isClosedPosition(position) : false;
+  if (herScore < -280) return random() < 0.7;
+  if (Math.abs(herScore) <= 120) return random() < (closed ? 0.38 : 0.28);
+  if (herScore > 280) return random() < (closed ? 0.05 : 0.01);
+  return random() < (closed ? 0.15 : 0.06);
+}
+
+/** Whether she should proactively offer a draw after her own move. */
+export function shouldOfferDraw(position, evalWhite, playerColor, historyLength, random = Math.random) {
+  if (historyLength < 20) return false;
+  const herScore = evalWhite * (playerColor === 'white' ? -1 : 1);
+  if (herScore < -160 || herScore > 180) return false;
+  const chance = isClosedPosition(position) ? 0.16 : 0.09;
+  return random() < chance;
 }
 
 /** Keep a line and its portrait together until the reader has time to read it.

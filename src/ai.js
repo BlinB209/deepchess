@@ -13,35 +13,35 @@ import { BISHOP, BLACK, KING, KNIGHT, PAWN, QUEEN, ROOK, WHITE, colorOf, typeOf 
 export const LEVELS = {
   l1: {
     id: 'l1', title: '摸鱼', rating: 800,
-    depth: 1, timeMs: 140, nodes: 40000, blunder: 0.34, noise: 90, quiesce: false,
+    depth: 1, timeMs: 160, nodes: 40000, blunder: 0.22, blunderLoss: 350, noise: 80, quiesce: false,
   },
   l2: {
     id: 'l2', title: '陪练', rating: 1100,
-    depth: 2, timeMs: 450, nodes: 120000, blunder: 0.18, noise: 50, quiesce: true,
+    depth: 2, timeMs: 500, nodes: 120000, blunder: 0.1, blunderLoss: 260, noise: 45, quiesce: true,
   },
   l3: {
     id: 'l3', title: '入门', rating: 1400,
-    depth: 3, timeMs: 850, nodes: 260000, blunder: 0.08, noise: 24, quiesce: true,
+    depth: 3, timeMs: 900, nodes: 260000, blunder: 0.04, blunderLoss: 180, noise: 20, quiesce: true,
   },
   l4: {
     id: 'l4', title: '认真', rating: 1700,
-    depth: 4, timeMs: 1300, nodes: 450000, blunder: 0.02, noise: 12, quiesce: true,
+    depth: 4, timeMs: 1300, nodes: 450000, blunder: 0.015, blunderLoss: 120, noise: 10, quiesce: true,
   },
   l5: {
     id: 'l5', title: '进阶', rating: 2000,
-    depth: 5, timeMs: 1800, nodes: 650000, blunder: 0, noise: 6, quiesce: true,
+    depth: 5, timeMs: 1800, nodes: 650000, blunder: 0, blunderLoss: 0, noise: 6, quiesce: true,
   },
   l6: {
     id: 'l6', title: '熟练', rating: 2200,
-    depth: 6, timeMs: 2400, nodes: 900000, blunder: 0, noise: 3, quiesce: true,
+    depth: 6, timeMs: 2400, nodes: 900000, blunder: 0, blunderLoss: 0, noise: 3, quiesce: true,
   },
   l7: {
     id: 'l7', title: '鲸鱼', rating: 2500,
-    depth: 7, timeMs: 3200, nodes: 1200000, blunder: 0, noise: 1, quiesce: true,
+    depth: 7, timeMs: 3200, nodes: 1200000, blunder: 0, blunderLoss: 0, noise: 1, quiesce: true,
   },
   l8: {
     id: 'l8', title: '深渊', rating: 3000,
-    depth: 9, timeMs: 5000, nodes: 2500000, blunder: 0, noise: 0, quiesce: true,
+    depth: 9, timeMs: 5000, nodes: 2500000, blunder: 0, blunderLoss: 0, noise: 0, quiesce: true,
   },
 };
 
@@ -240,38 +240,44 @@ export function materialBalance(position) {
   return evaluateWhite(position);
 }
 
-function moveScore(position, move, ply, killers, history) {
-  if (move.captured) {
-    return 2000 + PIECE_VALUE[typeOf(move.captured)] * 8 - PIECE_VALUE[typeOf(move.piece)];
-  }
+function moveScore(move) {
+  if (move.captured) return 2000 + PIECE_VALUE[typeOf(move.captured)] * 8 - PIECE_VALUE[typeOf(move.piece)];
   if (move.promotion) return 1800 + PIECE_VALUE[move.promotion];
-  if (killers[ply] && killers[ply].from === move.from && killers[ply].to === move.to) return 1200;
-  return history[move.from * 128 + move.to] || 0;
+  return 0;
 }
 
-function orderMoves(position, moves, ply, killers, history) {
+function orderMoves(moves, ply, killers, history) {
   return moves
-    .map((move) => ({ move, score: moveScore(position, move, ply, killers, history) }))
+    .map((move) => {
+      let score = moveScore(move);
+      if (killers[ply] && killers[ply].from === move.from && killers[ply].to === move.to) score += 1200;
+      score += history[move.from * 128 + move.to] || 0;
+      return { move, score };
+    })
     .sort((a, b) => b.score - a.score)
     .map((entry) => entry.move);
 }
 
-function quiesce(position, alpha, beta, ctx, depth) {
+function quiesce(position, alpha, beta, ctx, depth, ply) {
   ctx.nodes += 1;
   if (ctx.nodes > ctx.nodesCap || performance.now() > ctx.deadline) {
     ctx.aborted = true;
     return alpha;
   }
-  const stand = evaluate(position);
-  if (stand >= beta) return beta;
-  if (stand > alpha) alpha = stand;
-  if (depth <= 0) return alpha;
   const inCheck = position.inCheck();
-  const moves = position.generateLegal().filter((move) => inCheck || move.captured || move.promotion);
-  const ordered = orderMoves(position, moves, 0, ctx.killers, ctx.history);
+  if (!inCheck) {
+    const stand = evaluate(position);
+    if (stand >= beta) return beta;
+    if (stand > alpha) alpha = stand;
+    if (depth <= 0) return alpha;
+  }
+  const legal = position.generateLegal();
+  const moves = inCheck ? legal : legal.filter((move) => move.captured || move.promotion);
+  if (!moves.length) return inCheck ? -MATE + ply : alpha;
+  const ordered = orderMoves(moves, 0, ctx.killers, ctx.history);
   for (const move of ordered) {
     const undo = position.make(move);
-    const score = -quiesce(position, -beta, -alpha, ctx, depth - 1);
+    const score = -quiesce(position, -beta, -alpha, ctx, depth - 1, ply + 1);
     position.unmake(undo);
     if (ctx.aborted) return alpha;
     if (score >= beta) return beta;
@@ -280,59 +286,29 @@ function quiesce(position, alpha, beta, ctx, depth) {
   return alpha;
 }
 
-function hasNonPawnMaterial(position, color) {
-  for (let sq = 0; sq < 128; sq += 1) {
-    if ((sq & 0x88) !== 0) continue;
-    const piece = position.board[sq];
-    if (piece === 0 || colorOf(piece) !== color) continue;
-    const type = typeOf(piece);
-    if (type === KNIGHT || type === BISHOP || type === ROOK || type === QUEEN) return true;
-  }
-  return false;
-}
-
 function negamax(position, depth, alpha, beta, ply, ctx) {
   ctx.nodes += 1;
   if (ctx.nodes > ctx.nodesCap || ((ctx.nodes & 1023) === 0 && performance.now() > ctx.deadline)) {
     ctx.aborted = true;
     return 0;
   }
-  if (depth <= 0) return quiesce(position, alpha, beta, ctx, 4);
+  if (depth <= 0) return quiesce(position, alpha, beta, ctx, 4, ply);
   const inCheck = position.inCheck();
-  let searchDepth = depth;
-  if (inCheck && searchDepth < 8 && ply < 14) searchDepth += 1;
   const moves = position.generateLegal();
-  if (moves.length === 0) return inCheck ? -MATE + ply : 0;
-
-  if (!inCheck && searchDepth >= 3 && ply > 0 && hasNonPawnMaterial(position, position.turn)) {
-    const nullUndo = position.makeNull();
-    const nullScore = -negamax(position, searchDepth - 3, -beta, -beta + 1, ply + 1, ctx);
-    position.unmakeNull(nullUndo);
-    if (ctx.aborted) return 0;
-    if (nullScore >= beta) return beta;
-  }
-
-  const ordered = orderMoves(position, moves, ply, ctx.killers, ctx.history);
+  if (!moves.length) return inCheck ? -MATE + ply : 0;
+  const ordered = orderMoves(moves, ply, ctx.killers, ctx.history);
   let best = -INF;
-  let searched = 0;
   for (const move of ordered) {
-    const quiet = !move.captured && !move.promotion;
-    let reduction = 0;
-    if (!inCheck && searchDepth >= 3 && quiet && searched >= 4 && !(move.flags & 4)) reduction = 1;
     const undo = position.make(move);
-    let score = -negamax(position, searchDepth - 1 - reduction, -beta, -alpha, ply + 1, ctx);
-    if (reduction && score > alpha && !ctx.aborted) {
-      score = -negamax(position, searchDepth - 1, -beta, -alpha, ply + 1, ctx);
-    }
+    const score = -negamax(position, depth - 1, -beta, -alpha, ply + 1, ctx);
     position.unmake(undo);
     if (ctx.aborted) return best === -INF ? 0 : best;
-    searched += 1;
     if (score > best) best = score;
     if (score > alpha) alpha = score;
     if (alpha >= beta) {
-      if (quiet) {
+      if (!move.captured && !move.promotion) {
         ctx.killers[ply] = move;
-        ctx.history[move.from * 128 + move.to] = (ctx.history[move.from * 128 + move.to] || 0) + searchDepth * searchDepth;
+        ctx.history[move.from * 128 + move.to] = (ctx.history[move.from * 128 + move.to] || 0) + depth * depth;
       }
       break;
     }
@@ -341,19 +317,16 @@ function negamax(position, depth, alpha, beta, ply, ctx) {
 }
 
 /**
- * Pick a move for the given level. Synchronous: callers run it in a timer so
- * the panel can paint "thinking" first.
+ * Pick a move for the given level. The search is a plain, exact-window
+ * alpha-beta at the root; legal move ordering only changes speed, never the
+ * score. Low levels make bounded mistakes among the scored root moves, never
+ * a uniform random legal move.
  */
-export function chooseMove(position, levelId = 'l4', random = Math.random) {
-  const level = LEVELS[levelId] || LEVELS.l4;
+export function chooseMove(position, levelId = 'l5', random = Math.random) {
+  const level = LEVELS[levelId] || LEVELS.l5;
   const legal = position.generateLegal();
   if (!legal.length) return null;
   const started = performance.now();
-  if (level.blunder > 0 && random() < level.blunder) {
-    const move = legal[Math.floor(random() * legal.length)];
-    return { move, score: 0, nodes: 0, depth: 0, ms: Math.round(performance.now() - started), blundered: true };
-  }
-
   const ctx = {
     nodes: 0,
     nodesCap: level.nodes,
@@ -365,28 +338,40 @@ export function chooseMove(position, levelId = 'l4', random = Math.random) {
   let best = legal[0];
   let bestScore = -INF;
   let completed = 0;
+  let rootScores = [];
 
   for (let depth = 1; depth <= level.depth; depth += 1) {
+    const scored = [];
     let alpha = -INF;
     let localBest = null;
     let localScore = -INF;
-    const ordered = orderMoves(position, legal, 0, ctx.killers, ctx.history);
+    const ordered = orderMoves(legal, 0, ctx.killers, ctx.history);
     for (const move of ordered) {
       const undo = position.make(move);
-      const score = -negamax(position, depth - 1, -INF, -alpha, 1, ctx);
+      // Low levels need exact root scores to choose a bounded mistake.
+      // High levels use the normal root alpha window and can search deeper.
+      const score = -negamax(
+        position,
+        depth - 1,
+        -INF,
+        level.blunder > 0 ? INF : -alpha,
+        1,
+        ctx,
+      );
       position.unmake(undo);
       if (ctx.aborted) break;
-      const noisy = score + (level.noise ? (random() * 2 - 1) * level.noise : 0);
-      if (noisy > localScore) {
-        localScore = noisy;
+      scored.push({ move, score });
+      if (score > alpha) alpha = score;
+      if (score > localScore) {
+        localScore = score;
         localBest = move;
       }
-      if (noisy > alpha) alpha = noisy;
     }
     if (!ctx.aborted && localBest) {
       best = localBest;
       bestScore = localScore;
       completed = depth;
+      rootScores = scored.sort((a, b) => b.score - a.score);
       const index = legal.indexOf(localBest);
       if (index > 0) {
         legal.splice(index, 1);
@@ -396,13 +381,24 @@ export function chooseMove(position, levelId = 'l4', random = Math.random) {
     if (ctx.aborted) break;
   }
 
+  let blundered = false;
+  if (completed && level.blunder > 0 && rootScores.length > 1 && random() < level.blunder) {
+    const top = rootScores[0].score;
+    const mistakes = rootScores.slice(1).filter((entry) => top - entry.score <= level.blunderLoss);
+    if (mistakes.length) {
+      const picked = mistakes[Math.floor(random() * mistakes.length)].move;
+      blundered = picked !== best;
+      best = picked;
+    }
+  }
+
   return {
     move: best,
     score: bestScore,
     nodes: ctx.nodes,
     depth: completed,
     ms: Math.round(performance.now() - started),
-    blundered: false,
+    blundered,
   };
 }
 

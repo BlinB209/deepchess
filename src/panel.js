@@ -5,11 +5,11 @@
  * pixel UI. The Host half is intentionally empty.
  */
 
-import { SpeechDirector, acceptsDraw, classifyDialogueMove, describeQuality, detectOpening, estimateMoveLoss, selectSpecial } from './dialogue.js';
+import { SpeechDirector, acceptsDraw, classifyDialogueMove, describeQuality, detectOpening, estimateMoveLoss, selectSpecial, shouldOfferDraw } from './dialogue.js';
 import { Banter, MOOD_LABEL, chooseMood, moveContext } from './persona.js';
 
 const PIECE_KEY = ['', 'p', 'n', 'b', 'r', 'q', 'k'];
-const BUILD_VERSION = '0.6.0';
+const BUILD_VERSION = '0.7.0';
 const SAVE_KEY = 'deepchess.save.v1';
 const SETTINGS_KEY = 'deepchess.settings.v2';
 const STATS_KEY = 'deepchess.stats.v1';
@@ -297,6 +297,7 @@ export function DeepChessPanel(props) {
   const [anim, setAnim] = React.useState(null);
   const [boardShake, setBoardShake] = React.useState(false);
   const [drawPending, setDrawPending] = React.useState(false);
+  const [incomingDraw, setIncomingDraw] = React.useState(false);
   const boardRef = React.useRef(null);
   const animTimer = React.useRef(null);
   const drawTimer = React.useRef(null);
@@ -318,6 +319,7 @@ export function DeepChessPanel(props) {
   const idleSaidRef = React.useRef(false);
   const speechDirectorRef = React.useRef(null);
   const openingSaidRef = React.useRef('');
+  const drawOfferedRef = React.useRef(false);
   const lowSaidRef = React.useRef(false);
   const longSaidRef = React.useRef(false);
   if (!speechDirectorRef.current) speechDirectorRef.current = new SpeechDirector(showSpeech);
@@ -665,6 +667,8 @@ export function DeepChessPanel(props) {
     factsRef.current = { blunders: 0, blunderStreak: 0, undos: 0 };
     specialRef.current = new Set();
     openingSaidRef.current = '';
+    drawOfferedRef.current = false;
+    setIncomingDraw(false);
     lowSaidRef.current = false;
     longSaidRef.current = false;
     speechDirectorRef.current.reset();
@@ -694,7 +698,7 @@ export function DeepChessPanel(props) {
       setDrawPending(false);
       return;
     }
-    const accept = acceptsDraw(evaluateWhite(game.position), playerColor);
+    const accept = acceptsDraw(evaluateWhite(game.position), playerColor, Math.random, game.position);
     if (accept) {
       finish({ state: 'draw', winner: null, reason: 'agreement' }, 'agreement');
     } else {
@@ -705,7 +709,7 @@ export function DeepChessPanel(props) {
 
   function offerDraw() {
     setConfirm(null);
-    if (over || thinking || drawPending) return;
+    if (over || thinking || drawPending || incomingDraw) return;
     setDrawPending(true);
     speechDirectorRef.current.reset();
     say('drawOffer', {}, 'thinking', true);
@@ -714,6 +718,27 @@ export function DeepChessPanel(props) {
       setDrawPending(false);
       resolveDraw();
     }, 760);
+  }
+
+  function acceptIncomingDraw() {
+    setIncomingDraw(false);
+    if (over) return;
+    finish({ state: 'draw', winner: null, reason: 'agreement' }, 'agreement');
+  }
+
+  function declineIncomingDraw() {
+    setIncomingDraw(false);
+    say('drawDecline', {}, 'pout', true);
+    showToast(t('toast.drawDeclined'));
+  }
+
+  function maybeOfferDraw() {
+    if (over || incomingDraw || drawPending || menu || confirm || pendingPromo || drawOfferedRef.current) return;
+    if (game.turn !== playerTurn || game.inCheck()) return;
+    if (!shouldOfferDraw(game.position, evaluateWhite(game.position), playerColor, game.history.length)) return;
+    drawOfferedRef.current = true;
+    setIncomingDraw(true);
+    say('drawAsk', {}, 'thinking', true);
   }
 
   React.useEffect(() => {
@@ -779,6 +804,7 @@ export function DeepChessPanel(props) {
           if (!maybeOpening(ctx, event)) say(event, ctx);
         }
         maybeStateComment();
+        maybeOfferDraw();
         persist();
       } catch (error) {
         setThinking(false);
@@ -863,6 +889,23 @@ export function DeepChessPanel(props) {
     else if (final.reason === 'resign') resultTitle = t('result.resign');
     else resultTitle = final.winner === playerColor ? t('result.win') : t('result.lose');
   }
+
+  const confirmMeta = confirm === 'new'
+    ? {
+      mark: '新', tone: 'new', title: t('confirm.new'), desc: t('confirm.newDesc'), note: t('confirm.newNote'),
+      button: t('btn.restart'), action: () => { setConfirm(null); startNew(); },
+    }
+    : confirm === 'resign'
+      ? {
+        mark: '认', tone: 'resign', title: t('confirm.resign'), desc: t('confirm.resignDesc'), note: t('confirm.resignNote'),
+        button: t('btn.resignNow'), action: resign,
+      }
+      : confirm === 'draw'
+        ? {
+          mark: '和', tone: 'draw', title: t('confirm.draw'), desc: t('confirm.drawNote'), note: t('confirm.drawHint'),
+          button: t('btn.offerDraw'), action: offerDraw,
+        }
+        : null;
 
   return React.createElement('div', { className: 'dc-root' },
     React.createElement('div', { className: 'dc-head' },
@@ -959,32 +1002,85 @@ export function DeepChessPanel(props) {
         .replace('{wins}', stats.wins)
         .replace('{losses}', stats.losses)
         .replace('{draws}', stats.draws))),
-    confirm
+    confirmMeta
       ? React.createElement('div', { className: 'dc-overlay', style: { zIndex: 35 } },
         React.createElement('div', { className: 'dc-sheet-body' },
-          confirm === 'draw'
-            ? React.createElement('div', { className: 'dc-draw-wrap' },
-              React.createElement('div', { className: 'dc-draw-card' },
-                React.createElement('div', { className: 'dc-draw-mark' }, '和'),
-                React.createElement('div', { className: 'dc-draw-copy' },
-                  React.createElement('div', { className: 'dc-draw-title' }, t('confirm.draw')),
-                  React.createElement('div', { className: 'dc-draw-desc' }, t('confirm.drawNote')))))
-            : React.createElement('div', { className: 'dc-row' },
-              React.createElement('div', { className: 'dc-row-label' },
-                confirm === 'new' ? t('confirm.new') : confirm === 'resign' ? t('confirm.resign') : t('confirm.reset')))),
+          React.createElement('div', { className: 'dc-confirm-wrap' },
+            React.createElement('div', { className: `dc-confirm-card ${confirmMeta.tone}` },
+              React.createElement('div', { className: 'dc-confirm-mark' }, confirmMeta.mark),
+              React.createElement('div', { className: 'dc-confirm-copy' },
+                React.createElement('div', { className: 'dc-confirm-title' }, confirmMeta.title),
+                React.createElement('div', { className: 'dc-confirm-desc' }, confirmMeta.desc),
+                React.createElement('div', { className: 'dc-confirm-note' }, confirmMeta.note))))),
         React.createElement('div', { className: 'dc-overlay-actions' },
           React.createElement('button', { type: 'button', className: 'dc-btn', onClick: () => setConfirm(null) }, t('btn.cancel')),
           React.createElement('button', {
             type: 'button',
-            className: confirm === 'resign' ? 'dc-btn red' : 'dc-btn gold',
-            onClick: confirm === 'new' ? () => { setConfirm(null); startNew(); } : confirm === 'resign' ? resign : offerDraw,
-          }, confirm === 'draw' ? t('btn.offerDraw') : t('btn.confirm'))))
+            className: confirmMeta.tone === 'resign' ? 'dc-btn red' : 'dc-btn gold',
+            onClick: confirmMeta.action,
+          }, confirmMeta.button)))
+      : null,
+    incomingDraw
+      ? React.createElement('div', { className: 'dc-overlay', style: { zIndex: 36 } },
+        React.createElement('div', { className: 'dc-sheet-body' },
+          React.createElement('div', { className: 'dc-confirm-wrap' },
+            React.createElement('div', { className: 'dc-confirm-card draw' },
+              React.createElement('div', { className: 'dc-confirm-mark' }, '和'),
+              React.createElement('div', { className: 'dc-confirm-copy' },
+                React.createElement('div', { className: 'dc-confirm-title' }, t('draw.incomingTitle')),
+                React.createElement('div', { className: 'dc-confirm-desc' }, t('draw.incomingDesc')),
+                React.createElement('div', { className: 'dc-confirm-note' }, t('draw.incomingNote')))))),
+        React.createElement('div', { className: 'dc-overlay-actions' },
+          React.createElement('button', { type: 'button', className: 'dc-btn', onClick: declineIncomingDraw }, t('btn.declineDraw')),
+          React.createElement('button', { type: 'button', className: 'dc-btn gold', onClick: acceptIncomingDraw }, t('btn.acceptDraw'))))
       : null,
     over && !menu
       ? React.createElement('div', { className: 'dc-result' },
-        React.createElement('div', { className: 'dc-result-title' }, resultTitle),
-        React.createElement('div', { className: 'dc-result-sub' }, speech),
-        React.createElement('button', { type: 'button', className: 'dc-btn gold', onClick: startNew }, t('btn.rematch')))
+        React.createElement('div', { className: 'dc-result-sheet' },
+          React.createElement('div', { className: 'dc-result-kicker' }, t('result.kicker')),
+          React.createElement('div', { className: 'dc-result-title' }, resultTitle),
+          React.createElement('div', { className: 'dc-result-sub' }, speech),
+          React.createElement('div', { className: 'dc-result-meta' },
+            `${t('result.moves').replace('{n}', Math.ceil(game.history.length / 2))} · ${t('set.stats.value')
+              .replace('{wins}', stats.wins).replace('{losses}', stats.losses).replace('{draws}', stats.draws)}`),
+          React.createElement('div', { className: 'dc-result-section' },
+            React.createElement('div', { className: 'dc-result-section-title' }, t('result.settings')),
+            React.createElement('div', { className: 'dc-result-diff' },
+              LEVEL_ORDER.map((id) => React.createElement('button', {
+                key: id,
+                type: 'button',
+                className: settings.difficulty === id ? 'on' : '',
+                onClick: () => changeDifficulty(id),
+                title: `${t(`diff.${id}`)} · ${LEVELS[id].rating}`,
+              }, t(`diff.${id}`)))),
+            React.createElement('div', { className: 'dc-result-row' },
+              React.createElement('span', { className: 'dc-result-row-label' }, t('set.side')),
+              React.createElement('div', { className: 'dc-result-seg' },
+                ['white', 'black'].map((side) => React.createElement('button', {
+                  key: side,
+                  type: 'button',
+                  className: settings.playerColor === side ? 'on' : '',
+                  onClick: () => setSettings((value) => ({ ...value, playerColor: side })),
+                }, t(`side.${side}`))))),
+            React.createElement('div', { className: 'dc-result-row' },
+              React.createElement('span', { className: 'dc-result-row-label' }, t('set.sound')),
+              React.createElement('button', {
+                type: 'button',
+                className: `dc-btn${settings.sound ? ' gold' : ''}`,
+                onClick: toggleSound,
+              }, settings.sound ? 'ON' : 'OFF')),
+            React.createElement('div', { className: 'dc-result-row' },
+              React.createElement('span', { className: 'dc-result-row-label' }, t('set.banter')),
+              React.createElement('div', { className: 'dc-result-seg' },
+                ['quiet', 'normal', 'chatty'].map((mode) => React.createElement('button', {
+                  key: mode,
+                  type: 'button',
+                  className: settings.banter === mode ? 'on' : '',
+                  onClick: () => setSettings((value) => ({ ...value, banter: mode })),
+                }, t(`banter.${mode}`)))))),
+          React.createElement('div', { className: 'dc-result-actions' },
+            React.createElement('button', { type: 'button', className: 'dc-btn gold', onClick: startNew }, t('btn.rematch')),
+            React.createElement('button', { type: 'button', className: 'dc-btn', onClick: () => setMenu('moves') }, t('btn.review')))))
       : null,
     pendingPromo
       ? React.createElement('div', { className: 'dc-promo' },

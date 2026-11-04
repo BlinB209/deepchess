@@ -73,7 +73,7 @@ test('new game cancels queued reactions and logs the displayed opening', () => {
   board(h).onSquare(0x14); h.flush(); board(h).onSquare(0x34); h.flush();
   h.advance(300);
   button(h, 'btn.new').props.onClick(); h.flush();
-  button(h, 'btn.confirm').props.onClick(); h.flush();
+  button(h, 'btn.restart').props.onClick(); h.flush();
   const opening = speech(h).text;
   assert.equal(gameSave(h).ucis.length, 0);
   h.advance(10000);
@@ -91,13 +91,31 @@ test('resignation during draw deliberation cancels its late reply', () => {
   button(h, 'btn.offerDraw').props.onClick(); h.flush();
   assert.equal(board(h).disabled, true);
   button(h, 'btn.resign').props.onClick(); h.flush();
-  button(h, 'btn.confirm').props.onClick(); h.flush();
+  button(h, 'btn.resignNow').props.onClick(); h.flush();
   const farewell = speech(h).text;
   h.advance(10000);
   assert.equal(speech(h).text, farewell);
   assert.equal(gameSave(h).manual.state, 'resign');
   h.unmount();
   assert.equal(h.clock.pending(), 0);
+});
+
+test('confirm cards and game-over result expose next-game settings', () => {
+  const h = panelHarness({ [settingsKey]: { sound: false } }, 0);
+  h.mount();
+  button(h, 'btn.new').props.onClick(); h.flush();
+  const card = h.nodes().find((n) => String(n.props.className || '').includes('dc-confirm-card'));
+  assert.ok(card);
+  assert.ok(button(h, 'btn.restart'));
+  button(h, 'btn.cancel').props.onClick(); h.flush();
+  button(h, 'btn.resign').props.onClick(); h.flush();
+  button(h, 'btn.resignNow').props.onClick(); h.flush();
+  assert.ok(h.nodes().some((n) => n.props.className === 'dc-result-sheet'));
+  assert.equal(h.nodes().filter((n) => n.props.className === 'dc-result-row').length, 3);
+  assert.equal(h.nodes().filter((n) => String(n.props.className || '') === 'dc-result-diff').length, 1);
+  assert.ok(button(h, 'btn.rematch'));
+  assert.ok(button(h, 'btn.review'));
+  h.unmount();
 });
 
 test('quiet mode avoids long-think and idle interruptions', () => {

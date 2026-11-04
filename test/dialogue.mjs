@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ChessGame, parseUci } from '../src/engine.js';
-import { SpeechDirector, acceptsDraw, classifyDialogueMove, describeQuality, detectOpening, estimateMoveLoss, selectSpecial } from '../src/dialogue.js';
+import { SpeechDirector, acceptsDraw, classifyDialogueMove, describeQuality, detectOpening, estimateMoveLoss, selectSpecial, shouldOfferDraw } from '../src/dialogue.js';
 import { fakeClock } from './harness.mjs';
 
 function play(game, uci) {
@@ -67,14 +67,23 @@ test('long synchronous search preserves time to finish reading the current line'
   assert.deepEqual(said, ['playerCheck', 'herQuiet']);
 });
 
-test('draw acceptance is possible only when she is behind, for both player colors', () => {
+test('draw acceptance allows equal positions and still resists winning positions', () => {
   for (const color of ['white', 'black']) {
     const playerLead = color === 'white' ? 500 : -500;
     assert.equal(acceptsDraw(playerLead, color, () => 0), true);
-    assert.equal(acceptsDraw(-playerLead, color, () => 0), false);
-    assert.equal(acceptsDraw(0, color, () => 0), false);
     assert.equal(acceptsDraw(playerLead, color, () => 0.9), false);
+    assert.equal(acceptsDraw(-playerLead, color, () => 0.9), false);
+    assert.equal(acceptsDraw(0, color, () => 0), true);
+    assert.equal(acceptsDraw(0, color, () => 0.9), false);
   }
+});
+
+test('she can offer a draw in a long, close game but not early or when clearly winning', () => {
+  const position = new ChessGame().position;
+  assert.equal(shouldOfferDraw(position, 0, 'white', 30, () => 0), true);
+  assert.equal(shouldOfferDraw(position, 0, 'white', 30, () => 0.99), false);
+  assert.equal(shouldOfferDraw(position, 0, 'white', 10, () => 0), false);
+  assert.equal(shouldOfferDraw(position, 900, 'white', 30, () => 0), false);
 });
 
 test('first check has priority over first capture, and her first check has its own event', () => {
