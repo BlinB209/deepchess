@@ -34,7 +34,7 @@ const game = new ChessGame();
 for (let ply = 0; ply < 40; ply += 1) {
   const status = game.status();
   if (status.state !== 'playing') break;
-  const pick = chooseMove(game.position, 'normal');
+  const pick = chooseMove(game.position, 'l4');
   if (!pick) break;
   const result = game.play(pick.move);
   if (!result) {

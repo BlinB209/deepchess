@@ -1,6 +1,6 @@
 {
   "name": "deepchess",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "private": true,
   "description": "深棋 DeepChess — 和像素风 DeepSeek 娘下一盘会斗嘴的国际象棋。",
   "type": "module",

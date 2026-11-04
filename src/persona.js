@@ -162,8 +162,12 @@ const DIFFICULTY = {
     easy: ['好呀，我放松一点。我们慢慢玩。', '摸鱼模式。今天就轻轻松松下吧。'], normal: ['陪练模式。一起找找棋盘上的小机会吧。', '嗯，我陪你练一盘。'], hard: ['我要认真啦。我们都好好发挥。', '认真模式。这一盘也请多指教哦。'],
     sharp: ['进阶模式。我会比刚才更专注一点。', '好，进阶模式。我们下得细一点吧。'],
     whale: ['鲸鱼模式。哼哼，我要拿出本事啦。', '好，鲸鱼模式。这盘我会仔细算哦。'], master: ['深渊模式。我会想久一点，陪我认真下一盘吧。', '那就拿出全力啦。你也要好好接招哦。'],
+    l1: ['L1，大概八百。先热身吧。', '从 L1 开始。我们慢慢来。'], l2: ['L2，千一左右。我会认真一点。', 'L2 模式。我们试试基本战术。'],
+    l3: ['L3，千四。别小看我哦。', 'L3 模式。这盘我会看得细一点。'], l4: ['L4，千七。我们认真下一盘。', 'L4 模式。我会好好接招。'],
+    l5: ['L5，两千。我要拿出真本事了。', 'L5 模式。粗心的着法会被我抓住。'], l6: ['L6，两千二。我会算得深一点。', 'L6 模式。可别走漏哦。'],
+    l7: ['L7，两千五。鲸鱼要认真了。', 'L7 模式。这盘我会仔细算。'], l8: ['L8，三千。想赢我，得拿出全部本事。', 'L8 模式。我会想久一点，陪我下完。'],
   },
-  en: { easy: ['A relaxed game, then. Let us have fun.'], normal: ['Practice mode. Let us explore together.'], hard: ['Time to focus. Let us both play our best.'], sharp: ['Advanced mode. I will focus a little more.'], whale: ['Whale mode! I will think carefully.'], master: ['Abyss mode. I may think longer. Let us give it our best.'] },
+  en: { easy: ['A relaxed game, then. Let us have fun.'], normal: ['Practice mode. Let us explore together.'], hard: ['Time to focus. Let us both play our best.'], sharp: ['Advanced mode. I will focus a little more.'], whale: ['Whale mode! I will think carefully.'], master: ['Abyss mode. I may think longer. Let us give it our best.'], l1: ['L1, around 800. Let us warm up.'], l2: ['L2, around 1100. I will focus a little.'], l3: ['L3, around 1400. Do not underestimate me.'], l4: ['L4, around 1700. Let us play seriously.'], l5: ['L5, around 2000. I am bringing my real game.'], l6: ['L6, around 2200. I will calculate deeper.'], l7: ['L7, around 2500. I will think carefully.'], l8: ['L8, around 3000. Give me your best.'] },
 };
 
 function fill(text, ctx, locale) {

@@ -8,70 +8,44 @@
  */
 import { BISHOP, BLACK, KING, KNIGHT, PAWN, QUEEN, ROOK, WHITE, colorOf, typeOf } from './engine.js';
 
+// Eight levels mirror Lichess's computer ladder. The ratings are targets,
+// not a claim that this small JS engine is as strong as Stockfish at L8.
 export const LEVELS = {
-  easy: {
-    id: 'easy',
-    title: '摸鱼',
-    depth: 1,
-    timeMs: 140,
-    nodes: 40000,
-    blunder: 0.34,
-    noise: 90,
-    quiesce: false,
+  l1: {
+    id: 'l1', title: '摸鱼', rating: 800,
+    depth: 1, timeMs: 140, nodes: 40000, blunder: 0.34, noise: 90, quiesce: false,
   },
-  normal: {
-    id: 'normal',
-    title: '陪练',
-    depth: 2,
-    timeMs: 450,
-    nodes: 120000,
-    blunder: 0.07,
-    noise: 34,
-    quiesce: true,
+  l2: {
+    id: 'l2', title: '陪练', rating: 1100,
+    depth: 2, timeMs: 450, nodes: 120000, blunder: 0.18, noise: 50, quiesce: true,
   },
-  hard: {
-    id: 'hard',
-    title: '认真',
-    depth: 5,
-    timeMs: 1600,
-    nodes: 500000,
-    blunder: 0,
-    noise: 4,
-    quiesce: true,
+  l3: {
+    id: 'l3', title: '入门', rating: 1400,
+    depth: 3, timeMs: 850, nodes: 260000, blunder: 0.08, noise: 24, quiesce: true,
   },
-  sharp: {
-    id: 'sharp',
-    title: '进阶',
-    depth: 6,
-    timeMs: 2000,
-    nodes: 750000,
-    blunder: 0,
-    noise: 2,
-    quiesce: true,
+  l4: {
+    id: 'l4', title: '认真', rating: 1700,
+    depth: 4, timeMs: 1300, nodes: 450000, blunder: 0.02, noise: 12, quiesce: true,
   },
-  whale: {
-    id: 'whale',
-    title: '鲸鱼',
-    depth: 7,
-    timeMs: 3200,
-    nodes: 1200000,
-    blunder: 0,
-    noise: 0,
-    quiesce: true,
+  l5: {
+    id: 'l5', title: '进阶', rating: 2000,
+    depth: 5, timeMs: 1800, nodes: 650000, blunder: 0, noise: 6, quiesce: true,
   },
-  master: {
-    id: 'master',
-    title: '深渊',
-    depth: 9,
-    timeMs: 5000,
-    nodes: 2500000,
-    blunder: 0,
-    noise: 0,
-    quiesce: true,
+  l6: {
+    id: 'l6', title: '熟练', rating: 2200,
+    depth: 6, timeMs: 2400, nodes: 900000, blunder: 0, noise: 3, quiesce: true,
+  },
+  l7: {
+    id: 'l7', title: '鲸鱼', rating: 2500,
+    depth: 7, timeMs: 3200, nodes: 1200000, blunder: 0, noise: 1, quiesce: true,
+  },
+  l8: {
+    id: 'l8', title: '深渊', rating: 3000,
+    depth: 9, timeMs: 5000, nodes: 2500000, blunder: 0, noise: 0, quiesce: true,
   },
 };
 
-export const LEVEL_ORDER = ['easy', 'normal', 'hard', 'sharp', 'whale', 'master'];
+export const LEVEL_ORDER = ['l1', 'l2', 'l3', 'l4', 'l5', 'l6', 'l7', 'l8'];
 
 const MATE = 100000;
 const INF = 1e9;
@@ -370,8 +344,8 @@ function negamax(position, depth, alpha, beta, ply, ctx) {
  * Pick a move for the given level. Synchronous: callers run it in a timer so
  * the panel can paint "thinking" first.
  */
-export function chooseMove(position, levelId = 'normal', random = Math.random) {
-  const level = LEVELS[levelId] || LEVELS.normal;
+export function chooseMove(position, levelId = 'l4', random = Math.random) {
+  const level = LEVELS[levelId] || LEVELS.l4;
   const legal = position.generateLegal();
   if (!legal.length) return null;
   const started = performance.now();

@@ -694,70 +694,44 @@ function perft(position, depth) {
  * "鲸鱼" instead of a single cliff.
  */
 
+// Eight levels mirror Lichess's computer ladder. The ratings are targets,
+// not a claim that this small JS engine is as strong as Stockfish at L8.
 const LEVELS = {
-  easy: {
-    id: 'easy',
-    title: '摸鱼',
-    depth: 1,
-    timeMs: 140,
-    nodes: 40000,
-    blunder: 0.34,
-    noise: 90,
-    quiesce: false,
+  l1: {
+    id: 'l1', title: '摸鱼', rating: 800,
+    depth: 1, timeMs: 140, nodes: 40000, blunder: 0.34, noise: 90, quiesce: false,
   },
-  normal: {
-    id: 'normal',
-    title: '陪练',
-    depth: 2,
-    timeMs: 450,
-    nodes: 120000,
-    blunder: 0.07,
-    noise: 34,
-    quiesce: true,
+  l2: {
+    id: 'l2', title: '陪练', rating: 1100,
+    depth: 2, timeMs: 450, nodes: 120000, blunder: 0.18, noise: 50, quiesce: true,
   },
-  hard: {
-    id: 'hard',
-    title: '认真',
-    depth: 5,
-    timeMs: 1600,
-    nodes: 500000,
-    blunder: 0,
-    noise: 4,
-    quiesce: true,
+  l3: {
+    id: 'l3', title: '入门', rating: 1400,
+    depth: 3, timeMs: 850, nodes: 260000, blunder: 0.08, noise: 24, quiesce: true,
   },
-  sharp: {
-    id: 'sharp',
-    title: '进阶',
-    depth: 6,
-    timeMs: 2000,
-    nodes: 750000,
-    blunder: 0,
-    noise: 2,
-    quiesce: true,
+  l4: {
+    id: 'l4', title: '认真', rating: 1700,
+    depth: 4, timeMs: 1300, nodes: 450000, blunder: 0.02, noise: 12, quiesce: true,
   },
-  whale: {
-    id: 'whale',
-    title: '鲸鱼',
-    depth: 7,
-    timeMs: 3200,
-    nodes: 1200000,
-    blunder: 0,
-    noise: 0,
-    quiesce: true,
+  l5: {
+    id: 'l5', title: '进阶', rating: 2000,
+    depth: 5, timeMs: 1800, nodes: 650000, blunder: 0, noise: 6, quiesce: true,
   },
-  master: {
-    id: 'master',
-    title: '深渊',
-    depth: 9,
-    timeMs: 5000,
-    nodes: 2500000,
-    blunder: 0,
-    noise: 0,
-    quiesce: true,
+  l6: {
+    id: 'l6', title: '熟练', rating: 2200,
+    depth: 6, timeMs: 2400, nodes: 900000, blunder: 0, noise: 3, quiesce: true,
+  },
+  l7: {
+    id: 'l7', title: '鲸鱼', rating: 2500,
+    depth: 7, timeMs: 3200, nodes: 1200000, blunder: 0, noise: 1, quiesce: true,
+  },
+  l8: {
+    id: 'l8', title: '深渊', rating: 3000,
+    depth: 9, timeMs: 5000, nodes: 2500000, blunder: 0, noise: 0, quiesce: true,
   },
 };
 
-const LEVEL_ORDER = ['easy', 'normal', 'hard', 'sharp', 'whale', 'master'];
+const LEVEL_ORDER = ['l1', 'l2', 'l3', 'l4', 'l5', 'l6', 'l7', 'l8'];
 
 const MATE = 100000;
 const INF = 1e9;
@@ -1056,8 +1030,8 @@ function negamax(position, depth, alpha, beta, ply, ctx) {
  * Pick a move for the given level. Synchronous: callers run it in a timer so
  * the panel can paint "thinking" first.
  */
-function chooseMove(position, levelId = 'normal', random = Math.random) {
-  const level = LEVELS[levelId] || LEVELS.normal;
+function chooseMove(position, levelId = 'l4', random = Math.random) {
+  const level = LEVELS[levelId] || LEVELS.l4;
   const legal = position.generateLegal();
   if (!legal.length) return null;
   const started = performance.now();
@@ -1294,8 +1268,12 @@ const DIFFICULTY = {
     easy: ['好呀，我放松一点。我们慢慢玩。', '摸鱼模式。今天就轻轻松松下吧。'], normal: ['陪练模式。一起找找棋盘上的小机会吧。', '嗯，我陪你练一盘。'], hard: ['我要认真啦。我们都好好发挥。', '认真模式。这一盘也请多指教哦。'],
     sharp: ['进阶模式。我会比刚才更专注一点。', '好，进阶模式。我们下得细一点吧。'],
     whale: ['鲸鱼模式。哼哼，我要拿出本事啦。', '好，鲸鱼模式。这盘我会仔细算哦。'], master: ['深渊模式。我会想久一点，陪我认真下一盘吧。', '那就拿出全力啦。你也要好好接招哦。'],
+    l1: ['L1，大概八百。先热身吧。', '从 L1 开始。我们慢慢来。'], l2: ['L2，千一左右。我会认真一点。', 'L2 模式。我们试试基本战术。'],
+    l3: ['L3，千四。别小看我哦。', 'L3 模式。这盘我会看得细一点。'], l4: ['L4，千七。我们认真下一盘。', 'L4 模式。我会好好接招。'],
+    l5: ['L5，两千。我要拿出真本事了。', 'L5 模式。粗心的着法会被我抓住。'], l6: ['L6，两千二。我会算得深一点。', 'L6 模式。可别走漏哦。'],
+    l7: ['L7，两千五。鲸鱼要认真了。', 'L7 模式。这盘我会仔细算。'], l8: ['L8，三千。想赢我，得拿出全部本事。', 'L8 模式。我会想久一点，陪我下完。'],
   },
-  en: { easy: ['A relaxed game, then. Let us have fun.'], normal: ['Practice mode. Let us explore together.'], hard: ['Time to focus. Let us both play our best.'], sharp: ['Advanced mode. I will focus a little more.'], whale: ['Whale mode! I will think carefully.'], master: ['Abyss mode. I may think longer. Let us give it our best.'] },
+  en: { easy: ['A relaxed game, then. Let us have fun.'], normal: ['Practice mode. Let us explore together.'], hard: ['Time to focus. Let us both play our best.'], sharp: ['Advanced mode. I will focus a little more.'], whale: ['Whale mode! I will think carefully.'], master: ['Abyss mode. I may think longer. Let us give it our best.'], l1: ['L1, around 800. Let us warm up.'], l2: ['L2, around 1100. I will focus a little.'], l3: ['L3, around 1400. Do not underestimate me.'], l4: ['L4, around 1700. Let us play seriously.'], l5: ['L5, around 2000. I am bringing my real game.'], l6: ['L6, around 2200. I will calculate deeper.'], l7: ['L7, around 2500. I will think carefully.'], l8: ['L8, around 3000. Give me your best.'] },
 };
 
 function fill(text, ctx, locale) {
@@ -1679,6 +1657,8 @@ const zh = {
   'diff.sharp': '进阶',
   'diff.whale': '鲸鱼',
   'diff.master': '深渊',
+  'diff.l1': 'L1', 'diff.l2': 'L2', 'diff.l3': 'L3', 'diff.l4': 'L4',
+  'diff.l5': 'L5', 'diff.l6': 'L6', 'diff.l7': 'L7', 'diff.l8': 'L8',
   'side.white': '执白',
   'side.black': '执黑',
   'banter.quiet': '安静',
@@ -1763,6 +1743,8 @@ const en = {
   'diff.sharp': 'Sharp',
   'diff.whale': 'Whale',
   'diff.master': 'Abyss',
+  'diff.l1': 'L1', 'diff.l2': 'L2', 'diff.l3': 'L3', 'diff.l4': 'L4',
+  'diff.l5': 'L5', 'diff.l6': 'L6', 'diff.l7': 'L7', 'diff.l8': 'L8',
   'side.white': 'White',
   'side.black': 'Black',
   'banter.quiet': 'Quiet',
@@ -2060,7 +2042,7 @@ body[data-theme="light"] .dc-root,
 
 
 const PIECE_KEY = ['', 'p', 'n', 'b', 'r', 'q', 'k'];
-const BUILD_VERSION = '0.5.1';
+const BUILD_VERSION = '0.6.0';
 const SAVE_KEY = 'deepchess.save.v1';
 const SETTINGS_KEY = 'deepchess.settings.v2';
 const STATS_KEY = 'deepchess.stats.v1';
@@ -2070,7 +2052,7 @@ const KEY_EVENTS = new Set([
 ]);
 
 const DEFAULT_SETTINGS = {
-  difficulty: 'hard',
+  difficulty: 'l5',
   playerColor: 'white',
   banter: 'normal',
   sound: true,
@@ -2095,9 +2077,15 @@ function writeJSON(key, value) {
   }
 }
 
+const LEGACY_DIFFICULTY = {
+  easy: 'l1', normal: 'l2', hard: 'l5', sharp: 'l6', whale: 'l7', master: 'l8',
+};
+
 function loadSettings() {
   const value = readJSON(SETTINGS_KEY, {});
-  return { ...DEFAULT_SETTINGS, ...(value && typeof value === 'object' ? value : {}) };
+  const next = { ...DEFAULT_SETTINGS, ...(value && typeof value === 'object' ? value : {}) };
+  if (!LEVELS[next.difficulty]) next.difficulty = LEGACY_DIFFICULTY[next.difficulty] || 'l4';
+  return next;
 }
 
 function loadStats() {
@@ -2445,8 +2433,8 @@ function DeepChessPanel(props) {
   function changeDifficulty(id) {
     if (id === settings.difficulty) return;
     setSettings((value) => ({ ...value, difficulty: id }));
-    if (!over) say('difficulty', { difficulty: id }, id === 'master' || id === 'whale' ? 'determined' : 'smile', true);
-    showToast(`${t('set.difficulty')} · ${t(`diff.${id}`)}`);
+    if (!over) say('difficulty', { difficulty: id }, id === 'l7' || id === 'l8' ? 'determined' : 'smile', true);
+    showToast(`${t('set.difficulty')} · ${t(`diff.${id}`)} · ${LEVELS[id]?.rating || ''}`);
   }
 
   function triggerShake() {
@@ -2932,7 +2920,8 @@ function DeepChessPanel(props) {
         type: 'button',
         className: `dc-diff${settings.difficulty === id ? ' on' : ''}`,
         onClick: () => changeDifficulty(id),
-        title: t(`diff.${id}`),
+        title: `${t(`diff.${id}`)} · ${LEVELS[id].rating}`,
+        'aria-label': `${t(`diff.${id}`)} · ${LEVELS[id].rating}`,
       }, t(`diff.${id}`)))),
     React.createElement('div', { className: 'dc-scene' },
       React.createElement('div', {
@@ -2998,7 +2987,7 @@ function DeepChessPanel(props) {
       React.createElement('span', { className: 'dc-moves-now' }, currentMoveText),
       React.createElement('span', { className: 'dc-moves-more' }, '›')),
     React.createElement('div', { className: 'dc-foot' },
-      React.createElement('span', null, `${t('set.difficulty')} ${t(`diff.${settings.difficulty}`)} · v${BUILD_VERSION}`),
+      React.createElement('span', null, `${t('set.difficulty')} ${t(`diff.${settings.difficulty}`)} · ${LEVELS[settings.difficulty]?.rating || ''} · v${BUILD_VERSION}`),
       React.createElement('span', null, t('set.stats.value')
         .replace('{wins}', stats.wins)
         .replace('{losses}', stats.losses)
@@ -3057,6 +3046,7 @@ function DeepChessPanel(props) {
                 type: 'button',
                 className: settings.difficulty === level ? 'on' : '',
                 onClick: () => changeDifficulty(level),
+                title: `${t(`diff.${level}`)} · ${LEVELS[level].rating}`,
               }, t(`diff.${level}`))))),
           React.createElement('div', { className: 'dc-row' },
             React.createElement('span', { className: 'dc-row-label' }, t('set.side')),

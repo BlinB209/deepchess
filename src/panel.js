@@ -9,7 +9,7 @@ import { SpeechDirector, acceptsDraw, classifyDialogueMove, describeQuality, det
 import { Banter, MOOD_LABEL, chooseMood, moveContext } from './persona.js';
 
 const PIECE_KEY = ['', 'p', 'n', 'b', 'r', 'q', 'k'];
-const BUILD_VERSION = '0.5.1';
+const BUILD_VERSION = '0.6.0';
 const SAVE_KEY = 'deepchess.save.v1';
 const SETTINGS_KEY = 'deepchess.settings.v2';
 const STATS_KEY = 'deepchess.stats.v1';
@@ -19,7 +19,7 @@ const KEY_EVENTS = new Set([
 ]);
 
 const DEFAULT_SETTINGS = {
-  difficulty: 'hard',
+  difficulty: 'l5',
   playerColor: 'white',
   banter: 'normal',
   sound: true,
@@ -44,9 +44,15 @@ function writeJSON(key, value) {
   }
 }
 
+const LEGACY_DIFFICULTY = {
+  easy: 'l1', normal: 'l2', hard: 'l5', sharp: 'l6', whale: 'l7', master: 'l8',
+};
+
 function loadSettings() {
   const value = readJSON(SETTINGS_KEY, {});
-  return { ...DEFAULT_SETTINGS, ...(value && typeof value === 'object' ? value : {}) };
+  const next = { ...DEFAULT_SETTINGS, ...(value && typeof value === 'object' ? value : {}) };
+  if (!LEVELS[next.difficulty]) next.difficulty = LEGACY_DIFFICULTY[next.difficulty] || 'l4';
+  return next;
 }
 
 function loadStats() {
@@ -394,8 +400,8 @@ export function DeepChessPanel(props) {
   function changeDifficulty(id) {
     if (id === settings.difficulty) return;
     setSettings((value) => ({ ...value, difficulty: id }));
-    if (!over) say('difficulty', { difficulty: id }, id === 'master' || id === 'whale' ? 'determined' : 'smile', true);
-    showToast(`${t('set.difficulty')} · ${t(`diff.${id}`)}`);
+    if (!over) say('difficulty', { difficulty: id }, id === 'l7' || id === 'l8' ? 'determined' : 'smile', true);
+    showToast(`${t('set.difficulty')} · ${t(`diff.${id}`)} · ${LEVELS[id]?.rating || ''}`);
   }
 
   function triggerShake() {
@@ -881,7 +887,8 @@ export function DeepChessPanel(props) {
         type: 'button',
         className: `dc-diff${settings.difficulty === id ? ' on' : ''}`,
         onClick: () => changeDifficulty(id),
-        title: t(`diff.${id}`),
+        title: `${t(`diff.${id}`)} · ${LEVELS[id].rating}`,
+        'aria-label': `${t(`diff.${id}`)} · ${LEVELS[id].rating}`,
       }, t(`diff.${id}`)))),
     React.createElement('div', { className: 'dc-scene' },
       React.createElement('div', {
@@ -947,7 +954,7 @@ export function DeepChessPanel(props) {
       React.createElement('span', { className: 'dc-moves-now' }, currentMoveText),
       React.createElement('span', { className: 'dc-moves-more' }, '›')),
     React.createElement('div', { className: 'dc-foot' },
-      React.createElement('span', null, `${t('set.difficulty')} ${t(`diff.${settings.difficulty}`)} · v${BUILD_VERSION}`),
+      React.createElement('span', null, `${t('set.difficulty')} ${t(`diff.${settings.difficulty}`)} · ${LEVELS[settings.difficulty]?.rating || ''} · v${BUILD_VERSION}`),
       React.createElement('span', null, t('set.stats.value')
         .replace('{wins}', stats.wins)
         .replace('{losses}', stats.losses)
@@ -1006,6 +1013,7 @@ export function DeepChessPanel(props) {
                 type: 'button',
                 className: settings.difficulty === level ? 'on' : '',
                 onClick: () => changeDifficulty(level),
+                title: `${t(`diff.${level}`)} · ${LEVELS[level].rating}`,
               }, t(`diff.${level}`))))),
           React.createElement('div', { className: 'dc-row' },
             React.createElement('span', { className: 'dc-row-label' }, t('set.side')),
