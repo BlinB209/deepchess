@@ -1659,6 +1659,8 @@ const zh = {
   'btn.resign': '认输',
   'btn.draw': '和棋',
   'btn.settings': '设置',
+  'sound.toggleOn': '开启音效',
+  'sound.toggleOff': '关闭音效',
   'btn.close': '关闭',
   'btn.rematch': '再来一局',
   'btn.cancel': '取消',
@@ -1713,6 +1715,8 @@ const zh = {
   'result.resign': '你认输了',
   'toast.undo': '已悔棋',
   'toast.new': '新的一局',
+  'toast.soundOn': '音效已开启',
+  'toast.soundOff': '音效已关闭',
   'toast.noUndo': '没有可悔的棋',
   'toast.drawRefused': 'DeepSeek 拒绝了和棋',
   'captured.you': '你吃',
@@ -1739,6 +1743,8 @@ const en = {
   'btn.resign': 'Resign',
   'btn.draw': 'Draw',
   'btn.settings': 'Settings',
+  'sound.toggleOn': 'Enable sound',
+  'sound.toggleOff': 'Mute sound',
   'btn.close': 'Close',
   'btn.rematch': 'Rematch',
   'btn.cancel': 'Cancel',
@@ -1793,6 +1799,8 @@ const en = {
   'result.resign': 'You resigned',
   'toast.undo': 'Move taken back',
   'toast.new': 'New game',
+  'toast.soundOn': 'Sound on',
+  'toast.soundOff': 'Sound off',
   'toast.noUndo': 'Nothing to undo',
   'toast.drawRefused': 'DeepSeek declined the draw',
   'captured.you': 'You took',
@@ -1903,6 +1911,7 @@ body[data-theme="light"] .dc-root,
 .dc-head-actions{margin-left:auto;display:flex;gap:6px}
 .dc-icon-btn{width:26px;height:26px;display:grid;place-items:center;background:var(--dc-bg-panel);border:2px solid var(--dc-border);color:var(--dc-text);cursor:pointer;padding:0}
 .dc-icon-btn:hover{background:var(--dc-bg-hover)}
+.dc-icon-btn.on{background:var(--dc-gold);color:var(--dc-gold-ink);border-color:var(--dc-gold-border)}
 
 .dc-diffbar{display:flex;align-items:center;gap:4px;padding:5px 8px;background:var(--dc-bg-deep);border-bottom:2px solid var(--dc-border-soft);flex:0 0 auto;overflow-x:auto}
 .dc-diffbar-label{color:var(--dc-text-muted);margin-right:2px;flex:0 0 auto;font-size:12px}
@@ -2051,7 +2060,7 @@ body[data-theme="light"] .dc-root,
 
 
 const PIECE_KEY = ['', 'p', 'n', 'b', 'r', 'q', 'k'];
-const BUILD_VERSION = '0.5.0';
+const BUILD_VERSION = '0.5.1';
 const SAVE_KEY = 'deepchess.save.v1';
 const SETTINGS_KEY = 'deepchess.settings.v2';
 const STATS_KEY = 'deepchess.stats.v1';
@@ -2171,6 +2180,13 @@ function PixelGlyph({ name }) {
   if (name === 'chat') {
     return React.createElement('svg', common,
       React.createElement('path', { d: 'M2 2h12v9H7l-3 3v-3H2V2zm2 2v5h8V4H4z', fill: 'currentColor' }));
+  }
+  if (name === 'sound' || name === 'muted') {
+    return React.createElement('svg', common,
+      React.createElement('path', { d: 'M2 6h3l4-3v10l-4-3H2V6z', fill: 'currentColor' }),
+      name === 'muted'
+        ? React.createElement('path', { d: 'M11 6l4 4m0-4l-4 4', stroke: 'currentColor', strokeWidth: 2, fill: 'none' })
+        : React.createElement('path', { d: 'M11 5l2 3-2 3M13 3l3 5-3 5', stroke: 'currentColor', strokeWidth: 1.5, fill: 'none' }));
   }
   return React.createElement('svg', common,
     React.createElement('path', { d: 'M2 2h3v3H2V2zm4 0h3v3H6V2zm4 0h4v3h-4V2zM2 6h12v2H2V6zm0 4h12v2H2v-2zm0 4h8v2H2v-2z', fill: 'currentColor' }));
@@ -2511,7 +2527,7 @@ function DeepChessPanel(props) {
       osc.type = type;
       osc.frequency.setValueAtTime(freq, now);
       if (kind === 'capture') osc.frequency.exponentialRampToValueAtTime(140, now + duration);
-      gain.gain.setValueAtTime(0.035, now);
+      gain.gain.setValueAtTime(0.06, now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
       osc.connect(gain);
       gain.connect(ctx.destination);
@@ -2520,6 +2536,12 @@ function DeepChessPanel(props) {
     } catch {
       /* audio is optional */
     }
+  }
+
+  function toggleSound() {
+    const next = !settings.sound;
+    setSettings((value) => ({ ...value, sound: next }));
+    showToast(t(next ? 'toast.soundOn' : 'toast.soundOff'));
   }
 
   function pushLog(who, text) {
@@ -2602,7 +2624,7 @@ function DeepChessPanel(props) {
     idleSaidRef.current = false;
     animateMove(move, Boolean(move.captured), /[+#]/.test(result.san));
     bump();
-    playSound(move.captured ? 'capture' : 'move');
+    playSound(/[+#]/.test(result.san) ? 'check' : move.captured ? 'capture' : 'move');
     if (result.status.state !== 'playing') {
       finish(result.status, 'engine');
       return;
@@ -2786,7 +2808,7 @@ function DeepChessPanel(props) {
         bump();
         setThinking(false);
         aiRef.current = false;
-        playSound(move.captured ? 'capture' : 'move');
+        playSound(/[+#]/.test(result.san) ? 'check' : move.captured ? 'capture' : 'move');
         if (result.status.state !== 'playing') {
           finish(result.status, 'engine');
           return;
@@ -2894,6 +2916,14 @@ function DeepChessPanel(props) {
       React.createElement('div', { className: 'dc-head-actions' },
         React.createElement('button', { type: 'button', className: 'dc-icon-btn', onClick: () => setMenu(menu === 'moves' ? null : 'moves'), 'aria-label': t('moves.title'), title: t('moves.title') }, React.createElement(PixelGlyph, { name: 'moves' })),
         React.createElement('button', { type: 'button', className: 'dc-icon-btn', onClick: () => setMenu(menu === 'log' ? null : 'log'), 'aria-label': t('chat.title'), title: t('chat.title') }, React.createElement(PixelGlyph, { name: 'chat' })),
+        React.createElement('button', {
+          type: 'button',
+          className: `dc-icon-btn${settings.sound ? ' on' : ''}`,
+          onClick: toggleSound,
+          'aria-label': t(settings.sound ? 'sound.toggleOff' : 'sound.toggleOn'),
+          'aria-pressed': settings.sound,
+          title: t(settings.sound ? 'sound.toggleOff' : 'sound.toggleOn'),
+        }, React.createElement(PixelGlyph, { name: settings.sound ? 'sound' : 'muted' })),
         React.createElement('button', { type: 'button', className: 'dc-icon-btn', onClick: () => setMenu('settings'), 'aria-label': t('btn.settings'), title: t('btn.settings') }, React.createElement(PixelGlyph, { name: 'gear' })))),
     React.createElement('div', { className: 'dc-diffbar' },
       React.createElement('span', { className: 'dc-diffbar-label' }, t('set.difficulty')),

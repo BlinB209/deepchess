@@ -100,6 +100,7 @@ body[data-theme="light"] .dc-root,
 .dc-head-actions{margin-left:auto;display:flex;gap:6px}
 .dc-icon-btn{width:26px;height:26px;display:grid;place-items:center;background:var(--dc-bg-panel);border:2px solid var(--dc-border);color:var(--dc-text);cursor:pointer;padding:0}
 .dc-icon-btn:hover{background:var(--dc-bg-hover)}
+.dc-icon-btn.on{background:var(--dc-gold);color:var(--dc-gold-ink);border-color:var(--dc-gold-border)}
 
 .dc-diffbar{display:flex;align-items:center;gap:4px;padding:5px 8px;background:var(--dc-bg-deep);border-bottom:2px solid var(--dc-border-soft);flex:0 0 auto;overflow-x:auto}
 .dc-diffbar-label{color:var(--dc-text-muted);margin-right:2px;flex:0 0 auto;font-size:12px}

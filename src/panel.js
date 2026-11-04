@@ -9,7 +9,7 @@ import { SpeechDirector, acceptsDraw, classifyDialogueMove, describeQuality, det
 import { Banter, MOOD_LABEL, chooseMood, moveContext } from './persona.js';
 
 const PIECE_KEY = ['', 'p', 'n', 'b', 'r', 'q', 'k'];
-const BUILD_VERSION = '0.5.0';
+const BUILD_VERSION = '0.5.1';
 const SAVE_KEY = 'deepchess.save.v1';
 const SETTINGS_KEY = 'deepchess.settings.v2';
 const STATS_KEY = 'deepchess.stats.v1';
@@ -129,6 +129,13 @@ function PixelGlyph({ name }) {
   if (name === 'chat') {
     return React.createElement('svg', common,
       React.createElement('path', { d: 'M2 2h12v9H7l-3 3v-3H2V2zm2 2v5h8V4H4z', fill: 'currentColor' }));
+  }
+  if (name === 'sound' || name === 'muted') {
+    return React.createElement('svg', common,
+      React.createElement('path', { d: 'M2 6h3l4-3v10l-4-3H2V6z', fill: 'currentColor' }),
+      name === 'muted'
+        ? React.createElement('path', { d: 'M11 6l4 4m0-4l-4 4', stroke: 'currentColor', strokeWidth: 2, fill: 'none' })
+        : React.createElement('path', { d: 'M11 5l2 3-2 3M13 3l3 5-3 5', stroke: 'currentColor', strokeWidth: 1.5, fill: 'none' }));
   }
   return React.createElement('svg', common,
     React.createElement('path', { d: 'M2 2h3v3H2V2zm4 0h3v3H6V2zm4 0h4v3h-4V2zM2 6h12v2H2V6zm0 4h12v2H2v-2zm0 4h8v2H2v-2z', fill: 'currentColor' }));
@@ -469,7 +476,7 @@ export function DeepChessPanel(props) {
       osc.type = type;
       osc.frequency.setValueAtTime(freq, now);
       if (kind === 'capture') osc.frequency.exponentialRampToValueAtTime(140, now + duration);
-      gain.gain.setValueAtTime(0.035, now);
+      gain.gain.setValueAtTime(0.06, now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
       osc.connect(gain);
       gain.connect(ctx.destination);
@@ -478,6 +485,12 @@ export function DeepChessPanel(props) {
     } catch {
       /* audio is optional */
     }
+  }
+
+  function toggleSound() {
+    const next = !settings.sound;
+    setSettings((value) => ({ ...value, sound: next }));
+    showToast(t(next ? 'toast.soundOn' : 'toast.soundOff'));
   }
 
   function pushLog(who, text) {
@@ -560,7 +573,7 @@ export function DeepChessPanel(props) {
     idleSaidRef.current = false;
     animateMove(move, Boolean(move.captured), /[+#]/.test(result.san));
     bump();
-    playSound(move.captured ? 'capture' : 'move');
+    playSound(/[+#]/.test(result.san) ? 'check' : move.captured ? 'capture' : 'move');
     if (result.status.state !== 'playing') {
       finish(result.status, 'engine');
       return;
@@ -744,7 +757,7 @@ export function DeepChessPanel(props) {
         bump();
         setThinking(false);
         aiRef.current = false;
-        playSound(move.captured ? 'capture' : 'move');
+        playSound(/[+#]/.test(result.san) ? 'check' : move.captured ? 'capture' : 'move');
         if (result.status.state !== 'playing') {
           finish(result.status, 'engine');
           return;
@@ -852,6 +865,14 @@ export function DeepChessPanel(props) {
       React.createElement('div', { className: 'dc-head-actions' },
         React.createElement('button', { type: 'button', className: 'dc-icon-btn', onClick: () => setMenu(menu === 'moves' ? null : 'moves'), 'aria-label': t('moves.title'), title: t('moves.title') }, React.createElement(PixelGlyph, { name: 'moves' })),
         React.createElement('button', { type: 'button', className: 'dc-icon-btn', onClick: () => setMenu(menu === 'log' ? null : 'log'), 'aria-label': t('chat.title'), title: t('chat.title') }, React.createElement(PixelGlyph, { name: 'chat' })),
+        React.createElement('button', {
+          type: 'button',
+          className: `dc-icon-btn${settings.sound ? ' on' : ''}`,
+          onClick: toggleSound,
+          'aria-label': t(settings.sound ? 'sound.toggleOff' : 'sound.toggleOn'),
+          'aria-pressed': settings.sound,
+          title: t(settings.sound ? 'sound.toggleOff' : 'sound.toggleOn'),
+        }, React.createElement(PixelGlyph, { name: settings.sound ? 'sound' : 'muted' })),
         React.createElement('button', { type: 'button', className: 'dc-icon-btn', onClick: () => setMenu('settings'), 'aria-label': t('btn.settings'), title: t('btn.settings') }, React.createElement(PixelGlyph, { name: 'gear' })))),
     React.createElement('div', { className: 'dc-diffbar' },
       React.createElement('span', { className: 'dc-diffbar-label' }, t('set.difficulty')),
