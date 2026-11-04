@@ -3,7 +3,8 @@
  *
  * Strength is deliberately capped: the character should play a recognizable
  * game, make human-looking mistakes at low levels and never stall the panel.
- * Four levels change depth, time budget, evaluation noise and blunder rate.
+ * The levels are spaced out so there is a practical step between "认真" and
+ * "鲸鱼" instead of a single cliff.
  */
 import { BISHOP, BLACK, KING, KNIGHT, PAWN, QUEEN, ROOK, WHITE, colorOf, typeOf } from './engine.js';
 
@@ -32,10 +33,20 @@ export const LEVELS = {
     id: 'hard',
     title: '认真',
     depth: 5,
-    timeMs: 1800,
-    nodes: 550000,
+    timeMs: 1600,
+    nodes: 500000,
     blunder: 0,
-    noise: 8,
+    noise: 4,
+    quiesce: true,
+  },
+  sharp: {
+    id: 'sharp',
+    title: '进阶',
+    depth: 6,
+    timeMs: 2000,
+    nodes: 750000,
+    blunder: 0,
+    noise: 2,
     quiesce: true,
   },
   whale: {
@@ -60,7 +71,7 @@ export const LEVELS = {
   },
 };
 
-export const LEVEL_ORDER = ['easy', 'normal', 'hard', 'whale', 'master'];
+export const LEVEL_ORDER = ['easy', 'normal', 'hard', 'sharp', 'whale', 'master'];
 
 const MATE = 100000;
 const INF = 1e9;

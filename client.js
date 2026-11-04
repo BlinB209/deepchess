@@ -690,7 +690,8 @@ function perft(position, depth) {
  *
  * Strength is deliberately capped: the character should play a recognizable
  * game, make human-looking mistakes at low levels and never stall the panel.
- * Four levels change depth, time budget, evaluation noise and blunder rate.
+ * The levels are spaced out so there is a practical step between "认真" and
+ * "鲸鱼" instead of a single cliff.
  */
 
 const LEVELS = {
@@ -718,10 +719,20 @@ const LEVELS = {
     id: 'hard',
     title: '认真',
     depth: 5,
-    timeMs: 1800,
-    nodes: 550000,
+    timeMs: 1600,
+    nodes: 500000,
     blunder: 0,
-    noise: 8,
+    noise: 4,
+    quiesce: true,
+  },
+  sharp: {
+    id: 'sharp',
+    title: '进阶',
+    depth: 6,
+    timeMs: 2000,
+    nodes: 750000,
+    blunder: 0,
+    noise: 2,
     quiesce: true,
   },
   whale: {
@@ -746,7 +757,7 @@ const LEVELS = {
   },
 };
 
-const LEVEL_ORDER = ['easy', 'normal', 'hard', 'whale', 'master'];
+const LEVEL_ORDER = ['easy', 'normal', 'hard', 'sharp', 'whale', 'master'];
 
 const MATE = 100000;
 const INF = 1e9;
@@ -1119,1105 +1130,511 @@ function findMateInOne(position) {
 }
 
 
-/**
- * persona.js — 小鲸的台词库与出话逻辑。
- *
- * 目标不是“台词多”，而是像真人：短反应、具体观察、少量自嘲和垃圾话，
- * 并且记得上一手、换子、长考、悔棋这些事。所有句子按事件分类，情绪只影响
- * 语气池，不会把同一句换个表情重复说。
- */
-
-const MOODS = [
-  'calm', 'smile', 'smug', 'laugh', 'annoyed', 'angry', 'pout', 'panic',
-  'surprised', 'sad', 'cry', 'tired', 'thinking', 'wink', 'love',
-  'determined', 'embarrassed', 'sleepy',
-];
-
+/** DeepSeek：亲近、认真陪下，偶尔小傲娇；玩笑针对棋局，不贬低玩家。 */
+const MOODS = ['calm', 'smile', 'smug', 'laugh', 'annoyed', 'angry', 'pout', 'panic', 'surprised', 'sad', 'cry', 'tired', 'thinking', 'wink', 'love', 'determined', 'embarrassed', 'sleepy'];
 const MOOD_LABEL = {
-  zh: {
-    calm: '平静', smile: '微笑', smug: '得意', laugh: '大笑', annoyed: '恼火',
-    angry: '生气', pout: '鼓脸', panic: '慌张', surprised: '惊讶', sad: '沮丧',
-    cry: '哭', tired: '疲惫', thinking: '思考', wink: '眨眼', love: '喜欢',
-    determined: '认真', embarrassed: '害羞', sleepy: '困倦',
-  },
-  en: {
-    calm: 'Calm', smile: 'Smile', smug: 'Smug', laugh: 'Laugh', annoyed: 'Annoyed',
-    angry: 'Angry', pout: 'Pout', panic: 'Panic', surprised: 'Surprised', sad: 'Sad',
-    cry: 'Cry', tired: 'Tired', thinking: 'Thinking', wink: 'Wink', love: 'Love',
-    determined: 'Focused', embarrassed: 'Shy', sleepy: 'Sleepy',
-  },
+  zh: { calm: '平静', smile: '微笑', smug: '得意', laugh: '大笑', annoyed: '恼火', angry: '生气', pout: '鼓脸', panic: '慌张', surprised: '惊讶', sad: '沮丧', cry: '哭', tired: '疲惫', thinking: '思考', wink: '眨眼', love: '喜欢', determined: '认真', embarrassed: '害羞', sleepy: '困倦' },
+  en: { calm: 'Calm', smile: 'Smile', smug: 'Smug', laugh: 'Laugh', annoyed: 'Annoyed', angry: 'Angry', pout: 'Pout', panic: 'Flustered', surprised: 'Surprised', sad: 'Sad', cry: 'Teary', tired: 'Tired', thinking: 'Thinking', wink: 'Wink', love: 'Fond', determined: 'Focused', embarrassed: 'Shy', sleepy: 'Sleepy' },
 };
-
 const PIECE_ZH = { p: '兵', n: '马', b: '象', r: '车', q: '后', k: '王' };
 const PIECE_EN = { p: 'pawn', n: 'knight', b: 'bishop', r: 'rook', q: 'queen', k: 'king' };
 
 const T = {
-  // ── 开场 ──────────────────────────────────────────────
   start: {
-    _: [
-      '来吧。你先手。',
-      '新的一局。坐。',
-      '棋盘摆好了。',
-      '你执白。我准备好了。',
-      '别急，想好再走。',
-      '开始吧。',
-    ],
-    smile: [
-      '又见面了。这次想下多久？',
-      '我泡了杯茶，慢慢下。',
-      '你来了。坐吧。',
-    ],
-    calm: [
-      '我先看着。',
-      '慢慢来。',
-    ],
-    smug: [
-      '这次我不摸鱼。',
-      '你确定要跟我下？',
-    ],
+    _: ['用户来啦。棋盘摆好啦，陪我下一局吧。', '坐这边，水给你倒好了。慢慢下就好。', '又能一起下棋啦。今天也请多指教哦。', '我准备好啦。这盘也想和你好好下完。', '新的一局，新的小冒险。开始吧？'],
+    wink: ['今天的我有点厉害哦，你可要接住。', '先说好，棋盘上我可不会偷偷让着你哦。'],
+    determined: ['我准备认真下啦。我们都好好发挥。', '这一盘，我会仔细想的。请多指教。'],
   },
-
-  // ── 玩家普通走子 ─────────────────────────────────────
+  resume: { _: ['棋盘还替你留着呢。我们接着下？', '欢迎回来。上一手我还记着哦。', '你回来啦。我一直帮你看着棋盘呢。'] },
   playerQuiet: {
-    _: [
-      '嗯。',
-      '行。',
-      '我跟。',
-      '知道了。',
-      '让我看看。',
-      '这一步……',
-      '你走这儿。',
-      '好。',
-      '继续。',
-    ],
-    calm: [
-      '稳。',
-      '不急。',
-      '我慢慢来。',
-      '{move}。我记下了。',
-    ],
-    smug: [
-      '这步没什么野心。',
-      '你是在试探我？',
-      '还行。',
-      '{move}，我猜到了。',
-    ],
-    annoyed: [
-      '又是这种棋。',
-      '你能不能走快点。',
-    ],
-    thinking: [
-      '等一下，我算算。',
-      '这里有点意思。',
-    ],
+    _: ['嗯，看到啦。让我想想怎么接。', '你走这里呀……有点想知道你的下一步。', '好，这一步我记下了。', '嗯嗯，我在看。你按自己的节奏来。', '棋盘慢慢热闹起来啦。', '{move}，收到。现在换我想一想。', '唔……让我看看另一边。', '我们慢慢下，还有好多种走法呢。'],
+    thinking: ['唔，这里我得多看一眼。', '让我想想，该怎么接住你这一步呢。', '你在准备什么呀？我有点好奇。'],
+    smug: ['你这一步，我悄悄记在小本本上啦。', '哼哼，我也有自己的小计划。'],
+    love: ['和你安安静静下一会儿，也挺好的。', '你认真看棋盘的样子，我有看到哦。'],
   },
-
-  // ── 玩家吃子 ─────────────────────────────────────────
+  herQuiet: {
+    _: ['我走{move}。轮到你啦。', '先走这里。你慢慢看。', '好啦，这一步交给你接。', '我走好啦。我等你。', '我想试试这样下。', '嗯，就这里。接下来换你的小计划啦。', '走好啦，有点期待你怎么接。'],
+    smug: ['这一步，我藏了一点小心思哦。', '哼哼，我也有在认真布局。'],
+    determined: ['稳稳走一步。我们继续。', '我想好了，走这里。'],
+  },
   playerCapture: {
-    _: [
-      '你吃我{captured}？',
-      '用{piece}吃我{captured}？',
-      '行，拿走吧。',
-      '换就换。',
-      '{captured}而已。',
-      '你下手挺快。',
-      '这子你也要。',
-    ],
-    smug: [
-      '这个{captured}我本来也打算弃的。',
-      '吃吧，吃完就该我了。',
-      '不亏。',
-    ],
-    angry: [
-      '你吃我{captured}？',
-      '行，你等着。',
-    ],
-    panic: [
-      '等等，这个{captured}不能丢……',
-      '别别别。',
-    ],
-    sad: [
-      '……拿去吧。',
-    ],
+    _: ['呀，我的{captured}被你带走啦。', '你用{piece}吃了我的{captured}。这下换我想想。', '嗯，这个{captured}归你啦。我们继续。', '欸，吃到了。我得留心一点了。', '你下手好利落，我看见啦。'],
+    pout: ['唔，我的{captured}……让我鼓一下脸，就一下。', '哼，这个{captured}先给你。下一步我要看仔细点。'],
+    surprised: ['欸？原来你盯着我的{captured}呀。', '呀，这个{captured}还是被你吃到啦。'],
+    sad: ['有点舍不得这个{captured}呢。不过还没结束。'],
   },
-
-  // ── 她吃子 ───────────────────────────────────────────
   herCapture: {
-    _: [
-      '{captured}我收了。',
-      '{move}，{captured}归我。',
-      '这子归我。',
-      '谢谢。',
-      '吃你一个{captured}。',
-      '换子不亏。',
-      '归我了。',
-    ],
-    smug: [
-      '你刚才没看到吧？',
-      '这{captured}放在这儿，不就是给我的？',
-      '我就不客气了。',
-    ],
-    laugh: [
-      '哈，真给了我？',
-      '谢谢啊。',
-    ],
-    annoyed: [
-      '总算吃回来一个。',
-      '解气。',
-    ],
+    _: ['你的{captured}，我收下啦。', '嘿，吃到一个{captured}。轮到你啦。', '我走{move}，把这个{captured}带走咯。', '这个{captured}先放我这边。你慢慢想。', '嗯，吃到了。我们接着看下一步。'],
+    smug: ['这个{captured}归我。我有一点点得意。', '哼哼，这回是我先看到啦。'],
+    laugh: ['嘿嘿，{captured}归我啦。', '吃到啦！让我开心一小下。'],
+    wink: ['你的{captured}，我就不客气啦。', '谢谢款待～接下来可要看好哦。'],
   },
-
-  // ── 玩家将军 ─────────────────────────────────────────
   playerCheck: {
-    _: [
-      '{move}，将？',
-      '将？',
-      '看到了。',
-      '我挡。',
-      '这一将没什么用。',
-      '别急，我还在。',
-      '行，将军。',
-    ],
-    annoyed: [
-      '又来。',
-      '你烦不烦。',
-    ],
-    panic: [
-      '等等，我将着呢。',
-      '别催。',
-    ],
-    smug: [
-      '你就这点手段？',
-      '将一下而已。',
-    ],
+    _: ['呀，将军了。让我找找应对。', '看到啦，我先照顾一下王。', '这一将接到了。我想想怎么走。', '{move}，将军。嗯，我会仔细看的。'],
+    panic: ['欸，王被你盯上了！等我想一想。', '唔，有点紧张……先把这一将解开。'],
+    determined: ['将军接到了。我认真算一下。', '好，这一步我得仔细应对。'],
   },
-
-  // ── 她将军 ───────────────────────────────────────────
   herCheck: {
-    _: [
-      '{move}。将。',
-      '将。',
-      '轮到你了。',
-      '挡一下。',
-      '将军。',
-      '看清楚再走。',
-    ],
-    smug: [
-      '别慌，慢慢想。',
-      '你还有几步？',
-      '这步怎么样？',
-    ],
-    laugh: [
-      '哈，将到了。',
-      '抓到了。',
-    ],
-    calm: [
-      '别急，想清楚。',
-    ],
+    _: ['将军哦。先看看王这边，别急。', '我走{move}，将军。你慢慢想。', '我将军啦。接下来要先应将哦。'],
+    smug: ['哼哼，将到了。不过你慢慢想，我等着。', '这一将，算是我的小小回礼。'],
+    wink: ['将军～你的王要挪挪位置啦。', '这一手接好哦。我有在认真下。'],
   },
-
-  // ── 玩家失误 ─────────────────────────────────────────
   playerBlunder: {
-    _: [
-      '这步……你确定？',
-      '哦。',
-      '你送子了。',
-      '我收了？',
-      '你是不是看错了。',
-      '这步有点亏。',
-      '要悔棋吗？',
-    ],
-    laugh: [
-      '哈，谢谢。',
-      '这步我不客气了。',
-      '你认真的？',
-    ],
-    smug: [
-      '你刚刚那步，等于把{captured}递给我。',
-      '我都不好意思吃了。',
-      '这步，我记下了。',
-    ],
-    surprised: [
-      '等等，你认真的？',
-      '这步……是陷阱吗？',
-    ],
-    calm: [
-      '你想清楚。',
-      '再看看吧。',
-    ],
+    _: ['唔，这步可能有点亏。要不要再看看？', '这一步好像留了点破绽，我会接着下哦。', '这里可能漏看了一点。没关系，我们慢慢来。', '欸，这步我有机会了。下次记得多看一眼呀。', '这一手有点可惜。不过棋还没下完呢。'],
+    surprised: ['欸？这一步和我想的不太一样，我再看看。'],
+    smile: ['偶尔漏看很正常啦。我们继续，好不好？'],
+    smug: ['这步是{verdict}哦。{move} 一落，我就不客气了。', '臭棋哦。{move} 这步我记在小本本上了。'],
+    laugh: ['这步棋有点臭哦。{move} 是送给我的大礼吗？', '欸，你走神啦？那我可要收下这份礼物了。', '这步{verdict}……我都替你捏把汗。'],
   },
-
-  // ── 玩家好棋 ─────────────────────────────────────────
   playerGood: {
-    _: [
-      '嗯？这步不错。',
-      '有点东西。',
-      '我算漏了。',
-      '行，你认真了。',
-      '这手我记下了。',
-    ],
-    love: [
-      '这步好看。',
-      '你认真起来还挺厉害。',
-    ],
-    determined: [
-      '好，我也认真。',
-      '这局没那么容易。',
-    ],
-    surprised: [
-      '这步不在我预判里。',
-      '你什么时候会这个的？',
-    ],
-    annoyed: [
-      '……行吧。',
-    ],
+    _: ['这步好看！我有被惊艳到。', '嗯，这一步我很喜欢。你想得好仔细。', '好棋。我也得加把劲啦。', '你认真起来，我还真有点招架不住。'],
+    love: ['这步下得真漂亮。我喜欢和你这样认真下棋。'],
+    determined: ['接得漂亮。让我也认真回应你。'],
+    panic: ['等等，这步好棋……我有点慌。让我重新算。', '你这一步下得我心跳快了一拍。', '唔，这步让我有点怕。你什么时候想到的？'],
+    surprised: ['这步好棋！我完全没想到。', '欸，你认真起来这么厉害的吗。'],
   },
-
-  // ── 她失误 ───────────────────────────────────────────
   herBlunder: {
-    _: [
-      '……啊。',
-      '走错了。',
-      '刚才那步不算。',
-      '我重算一下。',
-      '失误。',
-    ],
-    embarrassed: [
-      '别笑。',
-      '我看错了。',
-      '这步……当我没说。',
-    ],
-    panic: [
-      '等等，我的{captured}。',
-      '不对不对。',
-    ],
-    sad: [
-      '……失误。',
-    ],
+    _: ['唔……这一步是我没看仔细。', '呀，刚才漏看了。我也会犯迷糊呢。', '走完才发现有点不对。下一步得认真啦。'],
+    embarrassed: ['呜，被你发现我漏算啦。让我缓一小下。', '刚才那步……有一点点丢脸。我下次看仔细。'],
+    pout: ['唔，这步走得不好。我有点不甘心。'],
+    sad: ['……这步是臭棋。我自己知道。', '唔，我怎么会走这里。让我缓一小下。'],
   },
-
-  // ── 她好棋 ───────────────────────────────────────────
   herGood: {
-    _: [
-      '这样应该够了。',
-      '我觉着这步还行。',
-      '你看住这边。',
-      '别急，还没完。',
-    ],
-    smug: [
-      '这步怎么样？',
-      '我算到了。',
-    ],
-    determined: [
-      '稳住。',
-      '还没结束。',
-    ],
+    _: ['这一步我挺满意的。轮到你啦。', '唔，应该接住了。我们继续。'],
+    smug: ['这步好棋是我下的。哼哼，夸我。', '看，这步我算到了。'],
+    wink: ['这步不错吧？我可是认真想过的。'],
   },
-
-  // ── 玩家长考 ─────────────────────────────────────────
-  playerThinkLong: {
-    _: [
-      '你慢慢想。',
-      '想这么久，是在算什么？',
-      '我不催。',
-      '要不我帮你走？',
-      '你还在吗？',
-    ],
-    tired: [
-      '我都快睡着了。',
-      '想到哪了？',
-    ],
-    annoyed: [
-      '你能不能快点。',
-    ],
-    smile: [
-      '不急，我等你。',
-    ],
+  opening: {
+    _: ['{opening}。这个开局我记下了。', '哦，{opening}呀。你是有备而来？', '开局走到{opening}了。我们慢慢看。'],
   },
-
-  // ── 她长考 ───────────────────────────────────────────
-  herThink: {
-    _: [
-      '让我看看……',
-      '嗯……',
-      '这里。',
-      '我算一下。',
-    ],
-    thinking: [
-      '等等，我算算。',
-      '这步有点难。',
-    ],
-    determined: [
-      '别急。',
-    ],
-  },
-
-  // ── 残局 ─────────────────────────────────────────────
-  lowMaterial: {
-    _: [
-      '子不多了。',
-      '残局了。',
-      '现在比谁少犯错。',
-      '慢慢下。',
-      '残局最磨人。',
-    ],
-    tired: [
-      '残局最磨人。',
-      '我眼睛都花了。',
-    ],
-    determined: [
-      '还没完。',
-    ],
-  },
-
-  // ── 长局 ─────────────────────────────────────────────
-  longGame: {
-    _: [
-      '这局有点长。',
-      '你累不累？',
-      '我都快没词了。',
-      '再下下去要天亮了。',
-    ],
-    sleepy: [
-      '哈……',
-      '我有点困了。',
-    ],
-    tired: [
-      '手都酸了。',
-    ],
-  },
-
-  // ── 悔棋 ─────────────────────────────────────────────
-  undo: {
-    _: [
-      '悔棋？',
-      '行，我当没看见。',
-      '你确定要退？',
-      '退吧，反正我记着。',
-    ],
-    pout: [
-      '……行吧。',
-      '就这一次。',
-    ],
-    annoyed: [
-      '又悔。',
-      '你能不能想好再走。',
-    ],
-    smug: [
-      '退一步也救不了。',
-    ],
-  },
-
-  // ── 认输 ─────────────────────────────────────────────
-  resign: {
-    _: [
-      '认输了？',
-      '行。',
-      '这局算我的。',
-      '下次再来。',
-    ],
-    smug: [
-      '承让。',
-    ],
-    calm: [
-      '好。',
-    ],
-    sad: [
-      '……不再试试？',
-    ],
-  },
-
-  // ── 她赢 ─────────────────────────────────────────────
+  herThink: { _: ['唔，让我想一会儿……', '这里有几种走法，我挑一挑。', '我在认真算哦，稍等我一下。', '让我把这几步理顺……'] },
+  playerThinkLong: { _: ['用户慢慢想，我陪着你呢。', '这一步不着急。想好了再走就行。', '要喝口水吗？棋盘我替你看着。', '我在呢。你按自己的节奏想。'], tired: ['我伸个懒腰。你慢慢想，我还在哦。'], sleepy: ['唔……有一点困，不过我还陪着你。'] },
+  idle: { _: ['用户还在吗？我在这里哦。想继续下的时候叫我就好。', '你先忙一会儿也没关系，棋盘给你留着。', '我安静陪你待一会儿。', '要歇一歇吗？我们不用赶时间。'], sleepy: ['哈……我眯一小会儿。你回来再继续。', '唔，棋盘不会跑。你回来叫我哦。'] },
+  lowMaterial: { _: ['子不多啦，每一步都值得仔细想。', '残局了。我们慢慢把它下好。'] },
+  longGame: { _: ['已经一起下了好久啦。记得活动一下肩膀哦。', '这盘好长。我还想陪你把它下完。'], tired: ['我伸个懒腰。你也休息一下肩膀吧。'], sleepy: ['哈……有点困啦。要不要先歇一会儿？'] },
+  undo: { _: ['好呀，已经退回去啦。这次慢慢看。', '没关系，重想一下嘛。我等你。', '这盘第{undos}次悔棋，记在小本本上啦。开玩笑的，慢慢来。', '退好啦。想试另一种走法？'], pout: ['又退一步呀。哼，那这次要好好想哦。'], smile: ['当然可以。一起琢磨才有意思嘛。'] },
+  resign: { _: ['好，这盘先到这里。辛苦啦，陪我下了这么久。', '收到啦。下棋也要看心情，想再下的时候我都在。', '那我收下这一局。下一盘还陪你哦。'], smug: ['哼哼，这局归我啦。下次还来找我，好不好？'] },
   win: {
-    _: [
-      '结束了。',
-      '你最后那步，其实还有救。',
-      '别灰心。',
-      '我赢了。',
-    ],
-    smug: [
-      '这局，我的。',
-      '承让。',
-    ],
-    laugh: [
-      '哈，赢了。',
-    ],
-    calm: [
-      '下得不错。',
-      '再来一局？',
-    ],
+    _: ['我赢啦！谢谢你陪我下这一盘。', '这局我收下啦。用户有几手走得很漂亮哦。', '结束啦。和你下棋很开心，还想再来吗？'],
+    smug: ['嘿嘿，这回是我赢。让我得意一小会儿。', '哼哼，今天的我也有好好发挥。再来？'],
+    laugh: ['赢啦！开心一下，然后陪你再下一局。'], wink: ['这局归我啦。下一盘等你来挑战哦。'], love: ['能和你认真下完一局，我就很开心啦。'],
   },
-
-  // ── 她输 ─────────────────────────────────────────────
   lose: {
-    _: [
-      '……我输了。',
-      '这局算你的。',
-      '别笑。',
-      '再来。',
-    ],
-    sad: [
-      '我认。',
-      '你下得好。',
-    ],
-    cry: [
-      '……',
-      '不算，再来一局。',
-    ],
-    embarrassed: [
-      '我失误了。',
-    ],
+    _: ['这盘你赢啦。下得漂亮，我服气。', '唔，我输了。谢谢你陪我下到最后。', '这局是你的啦。我想再琢磨一下刚才那几步。'],
+    sad: ['有一点点失落……不过你赢得很漂亮。', '唔，我还想把刚才那一步想明白。'],
+    cry: ['呜，我输了……缓一小会儿，还想和你下。', '好可惜呀。让我难过一下下，再来陪你。'],
+    pout: ['哼，有点不甘心。下一盘再和我试试嘛。', '这局算你的。我想再挑战一次！'], embarrassed: ['被你下赢啦。我要回去补补课了。'],
   },
-
-  // ── 和棋 ─────────────────────────────────────────────
-  draw: {
-    _: [
-      '和棋。',
-      '谁也没赢。',
-      '行吧，平局。',
-    ],
-    calm: [
-      '再来一局分胜负？',
-    ],
-    pout: [
-      '没劲。',
-    ],
-  },
-
-  // ── 再来 ─────────────────────────────────────────────
-  rematch: {
-    _: [
-      '再来。',
-      '这次我不让了。',
-      '摆棋。',
-    ],
-    smile: [
-      '好，再来。',
-    ],
-    determined: [
-      '这次我认真。',
-    ],
-  },
-
-  // ── 待机 ─────────────────────────────────────────────
-  idle: {
-    _: [
-      '……',
-      '你还在吗？',
-      '我等你。',
-      '要不我们聊会儿？',
-      '你走神了。',
-    ],
-    sleepy: [
-      '我先眯一会儿。',
-      '哈……',
-    ],
-    smile: [
-      '不急。',
-    ],
-  },
-
-  // ── 升变 ─────────────────────────────────────────────
-  promotion: {
-    _: [
-      '升变？选什么？',
-      '你要变后？',
-      '想清楚。',
-    ],
-    surprised: [
-      '升变了？',
-    ],
-    smug: [
-      '变什么都没用。',
-    ],
-  },
-
-  // ── 易位 ─────────────────────────────────────────────
-  castle: {
-    _: [
-      '易位？',
-      '你躲什么。',
-      '王藏起来了。',
-      '安全第一。',
-    ],
-  },
-
-  // ── 吃过路兵 ─────────────────────────────────────────
-  enPassant: {
-    _: [
-      '吃过路兵？',
-      '这你也记得。',
-      '行啊。',
-    ],
-    surprised: [
-      '等等，过路兵？',
-    ],
-  },
-
-  // ── 吃后 ─────────────────────────────────────────────
-  queenCapture: {
-    _: [
-      '后没了。',
-      '你把我的后吃了。',
-      '这局难了。',
-    ],
-    angry: [
-      '你吃我后？',
-      '行，你等着。',
-    ],
-    panic: [
-      '等等，我的后……',
-    ],
-    laugh: [
-      '哈，后换后，不亏。',
-    ],
-  },
-
-  // ── 提和 ─────────────────────────────────────────────
-  drawOffer: {
-    _: [
-      '想和棋？',
-      '再下下看。',
-      '现在和，太早了吧。',
-      '我还没输呢。',
-    ],
-    pout: [
-      '不干。',
-      '没劲。',
-      '再走几步。',
-    ],
-    smug: [
-      '你怕了？',
-      '想得美。',
-    ],
-  },
-
-  // ── 拒绝和棋 ─────────────────────────────────────────
-  drawRefuse: {
-    _: [
-      '不干。',
-      '想得美。',
-      '我还没输呢。',
-      '再下下嘛。',
-      '这局还没到和棋的时候。',
-    ],
-    pout: [
-      '不要。',
-      '才不和你和。',
-      '哼，继续下。',
-    ],
-    smug: [
-      '你怕了？',
-      '现在和棋，太便宜你了。',
-      '我正赢着呢。',
-    ],
-  },
-
-  // ── 戳一下 ───────────────────────────────────────────
+  draw: { _: ['和棋啦。两个人都守住了呢。', '这一盘谁也没赢，不过下得很开心。', '平局收场。想再来一局吗？'], pout: ['唔，就差一点点。不过和你下得很尽兴。'] },
+  rematch: { _: ['好呀，再陪你下一局。', '再来！我这次也会好好下。'] },
+  promotion: { _: ['你的兵升成{promotion}啦。小兵也长大了呢。', '呀，升变成{promotion}了！我得认真应对。'] },
+  herPromotion: { _: ['我的兵升成{promotion}啦。一路走到这里，真不容易。', '我选了{promotion}。接下来轮到你啦。'], smug: ['嘿，小兵变成{promotion}啦。让我小小得意一下。'] },
+  castle: { _: ['王车易位啦。给王安个小窝。', '你把王安顿好啦，我也得看看自己的布局。'] },
+  herCastle: { _: ['我易位啦。先给王找个安心的位置。', '王和车换好位置啦。轮到你。'] },
+  enPassant: { _: ['吃过路兵！你有记得这条规则呢。', '呀，这个兵路过也被你抓到啦。'] },
+  herEnPassant: { _: ['这个路过的兵，我收下啦。是吃过路兵哦。', '我走吃过路兵。嘿，这条规则正好用上。'] },
+  queenCapture: { _: ['呀，我的后被吃掉啦。接下来得更仔细了。', '唔，后没了……我还会好好接着下。'], angry: ['我的后呀……哼，我要认真把这盘下回来。'], panic: ['欸，我的后！让我先缓一小下。'], pout: ['哼，我的后被你带走了。有点舍不得呢。'] },
+  herQueenCapture: { _: ['你的后，我收下啦。棋还没结束，我们继续。', '吃到后啦。下一步也得认真看。'], smug: ['哼哼，这个后归我啦。我有点得意了。'], surprised: ['欸，我吃到你的后啦。让我再看一眼棋盘。'] },
+  drawOffer: { _: ['用户想和棋呀？让我看看现在的局面。', '收到提和。我想一小会儿。'] },
+  drawRefuse: { _: ['这盘我还想接着下，可以再陪我走几步吗？', '唔，现在先不和啦。我还想试试别的走法。', '我还想认真下完这一盘。我们继续吧。'], smug: ['哼哼，我还有小计划呢。先不和啦。'], pout: ['唔，还没下够呢。再陪我走几步嘛。'] },
   poke: {
-    _: [
-      '别戳。',
-      '干嘛。',
-      '我在想棋。',
-      '你手真闲。',
-      '再戳要收费了。',
-      '有事说事。',
-    ],
-    smug: [
-      '戳我干嘛？想认输？',
-      '你再戳，我就当你投降了。',
-      '别闹，我正赢着呢。',
-    ],
-    annoyed: [
-      '你再戳一下试试。',
-      '手拿开。',
-      '我数到三。',
-    ],
-    laugh: [
-      '哈，痒。',
-      '别闹，我笑点低。',
-    ],
-    panic: [
-      '别闹，我将着呢。',
-      '现在不是玩的时候。',
-    ],
-    sleepy: [
-      '唔……',
-      '让我眯一会儿。',
-    ],
-    embarrassed: [
-      '别、别戳。',
-      '你干嘛。',
-    ],
-    love: [
-      '你、你突然戳我干嘛……',
-      '别、别靠这么近。',
-      '再戳……也不是不行。',
-    ],
+    _: ['呀，怎么突然戳我。我有在陪你呀。', '欸？我在呢。你是不是想让我看看你？', '会痒啦。好啦，我看到你了。', '再戳要收费了哦……一盘棋就好。'],
+    love: ['你、你突然靠过来，我会害羞的。', '好啦，知道你在。我也在呀。', '再陪你待一会儿。就一会儿哦。'],
+    embarrassed: ['呀……别突然戳嘛。', '你这样，我会忘记刚才算到哪的。'],
+    annoyed: ['哼，先让我把这一步想完嘛。', '等一下下，我的思路要被戳跑啦。'],
+    pout: ['哼，又戳。我的脸可不是按钮哦。', '你手真闲……那就陪我好好下棋嘛。'],
+    laugh: ['哈哈，会痒的啦。', '别闹，我要笑得算不动棋了。'],
+    panic: ['先等一下嘛，我的王还被将着呢。'], sleepy: ['唔……我醒着呢。你回来啦？'],
+    sad: ['唔，陪我缓一小会儿吧。', '被你戳一下，好像没那么失落了。'], cry: ['呜……我在呢。让我缓一小会儿。'],
   },
-
-  // ── 回调 ─────────────────────────────────────────────
-  callback: {
-    _: [
-      '你上次也是这么走的。',
-      '又来？',
-      '这步你之前下过。',
-      '我记得你。',
-    ],
-    smug: [
-      '你以为换个顺序我就认不出了？',
-    ],
-  },
+  firstCapture: { _: ['呀，这盘第一个被吃的子是我的{captured}。记住啦。', '第一次吃子啦。你的小计划开始了？'] },
+  herFirstCapture: { _: ['嘿，我先吃到一个{captured}。这盘热闹起来啦。', '这盘第一次吃子，是我先动手啦。'] },
+  firstCheck: { _: ['欸，这盘第一次将军。我认真接招啦。', '第一次将军就到了呀。让我好好想一下。'] },
+  herFirstCheck: { _: ['我第一次将军啦。别急，你慢慢看。', '这一将先送给你。我也在认真下哦。'] },
+  queenTrade: { _: ['两个后都离场啦。接下来换别的棋子努力。', '双方的后都没了呢。我们慢慢下后面的棋。'] },
+  underpromotion: { _: ['升成了{promotion}呀！这个选择有点意思。', '你选了{promotion}。让我想想这里面的用意。'] },
+  herUnderpromotion: { _: ['我这次选{promotion}。想试试不一样的走法。', '我升成{promotion}啦。小兵也有自己的小计划。'] },
+  comeback: { _: ['你把局面扳回来啦。刚才那几步真有韧劲。', '欸，现在轮到我努力追上你了。'] },
+  herComeback: { _: ['唔，我把局面追回来一点啦。还得稳住。', '现在轮到你接招啦。我们都别松劲哦。'] },
+  blunderStreak: { _: ['好像连续几步都漏看了一点。要不要歇一下眼睛？', '这几步有点可惜。别着急，我陪你慢慢理。'] },
+  longGameSpecial: { _: ['已经一起下了五十回合啦。记得喝口水哦。', '这盘下了好久呢。谢谢你一直陪着我。'] },
+  lowMaterialSpecial: { _: ['子不多了呢。我们一起把残局下好吧。', '棋盘空下来啦。我要仔细看住每一步。'] },
+  threefold: { _: ['同一个局面出现三次啦，按规则和棋。', '我们绕回这里三次了呢。这盘平局收场。'] },
+  fiftyMove: { _: ['连续五十回合都没有吃子或走兵，和棋啦。', '五十回合规则到了呢。这盘算平局。'] },
+  checkmateWin: { _: ['将死，我赢啦。谢谢你陪我下到最后。', '嘿嘿，这局是我的。还想和你再下一盘。'] },
+  checkmateLose: { _: ['被你将死啦。这一局下得漂亮，我记住了。', '呜，我输了……有点不甘心，再陪我来一局嘛。'] },
+  callback: { _: ['这盘已经有{blunders}次漏看啦。要不要放慢一点？', '我记着呢。不着急，我们一点点看清楚。'] },
 };
-
-// Extra pool: keep the common events from cycling too soon.
-T.playerQuiet._.push(
-  '这一步，我没想到。', '你在准备什么？', '先这样。', '我看看另一边。',
-  '不急，慢慢来。', '这棋有点闷。', '你想换子？', '我偏不。',
-  '行，陪你走。', '嗯，继续。', '这步很安静。', '你在等我自己失误？',
-);
-T.playerCapture._.push(
-  '用{piece}换{captured}，你觉得值？', '这子我不要了。', '拿走吧，反正我还能走。',
-  '你吃子倒是干脆。', '好，交换。', '我不心疼。',
-);
-T.herCapture._.push(
-  '这个{captured}归我了。', '你漏看了。', '谢谢，正好缺个子。',
-  '吃回来。', '不客气。', '这子我惦记很久了。',
-);
-T.playerCheck._.push(
-  '将？我挡。', '这一将，我不怕。', '你先把王看好吧。',
-  '行，将军。', '我退一步。', '别急，我还在。',
-);
-T.herCheck._.push(
-  '将。想好怎么挡。', '这一下，够你忙的。', '别慌。',
-  '将军，轮到你了。', '你王的位置不太好。',
-);
-T.playerBlunder._.push(
-  '这步……你送了个{captured}。', '你确定不是点错了？', '我不客气了。',
-  '这步亏了。', '你刚才想什么呢？', '要不要悔棋？',
-);
-T.playerGood._.push(
-  '这步不错，我承认。', '你认真起来挺难缠。', '我得重新算。',
-  '好棋。', '这手有点疼。',
-);
-T.herBlunder._.push(
-  '……我看错了。', '这步不算。', '等一下。', '我怎么会走这个。', '别说话。',
-);
-T.herGood._.push(
-  '这步还行吧。', '你看住。', '我算过了。', '别急。', '还没完。',
-);
-T.lowMaterial._.push(
-  '子少了，棋盘大了。', '残局。', '现在一步都不能错。', '慢慢磨。',
-);
-T.longGame._.push('这局真长。', '你还不困？', '我都坐累了。');
-T.undo._.push('又退？', '行，就这一次。', '你退吧。', '我当没看见。');
-T.win._.push('这局我收下。', '下次再来。', '你最后急了。');
-T.lose._.push('这局你的。', '再来。', '我不服。');
-T.draw._.push('行吧。', '再来一局？');
-T.idle._.push('你还在吗？', '我等你。', '走神了？', '要不聊会儿。');
-T.drawOffer._.push('想和？', '再下下。', '不干。', '我还没输。');
-T.promotion._.push('变什么？', '想好了再说。');
-T.castle._.push('躲好了？', '王倒是安全了。');
-T.enPassant._.push('过路兵。', '你还记得这个。');
-T.queenCapture._.push('后没了。', '这局不好下了。');
-
-T.start._.push(
-  '我先把话放这儿：这局你要是能赢，我回去把模型卡吃了。',
-  '坐。棋盘我擦过了，输的人请客。',
-  '今天状态不错。你小心点。',
-);
-T.start.smug.push('这局我不打算让子。', '你确定要跟我下？我最近在加训。');
-T.start.determined = ['认真模式。我不会让子。'];
-T.playerQuiet._.push(
-  '你这一步，我记在小本本上了。',
-  '你在等我自己乱？',
-  '这棋下得，像在互相试探。',
-  '我闻到了一股陷阱味。',
-  '别急，我还没发力。',
-  '你这步，我看不出恶意。',
-  '行，我陪你磨。',
-);
-T.playerCapture._.push(
-  '你吃我{captured}？行，这局算私仇。',
-  '用{piece}换{captured}，你算过吗？',
-  '这子送你了，反正我子多。',
-  '你吃子的时候，眼睛都不眨。',
-);
-T.herCapture._.push(
-  '{captured}归我。你刚才那步，白走了。',
-  '谢谢投喂。',
-  '这子我收下，利息之后再算。',
-  '你漏看了一个。',
-);
-T.playerCheck._.push(
-  '将？你也就这点胆子。',
-  '行，将军。我挡。',
-  '你先把后面的子看住。',
-);
-T.herCheck._.push(
-  '将。别急着挡，先看看你还有没有别的子。',
-  '将军。你王的位置，我不太满意。',
-  '将到了。你慢慢想。',
-);
-T.playerBlunder._.push(
-  '这步……你是想让我赢得太明显？',
-  '你今天第{blunders}次送子了，我记着呢。',
-  '你确定不是点错了？我可以等你。',
-  '这步一走，我都不好意思吃了。',
-);
-T.playerGood._.push(
-  '这步有点东西。你认真起来，我还挺喜欢的。',
-  '好棋。我得重新算。',
-  '你什么时候学会这个的？',
-  '这手有点疼，但我认。',
-);
-T.herBlunder._.push(
-  '……刚才那步是我手滑。你敢笑，我就把你的兵全吃掉。',
-  '我收回。让我重走。',
-  '这步不算，我还没加载完。',
-);
-T.herGood._.push('这步我算了很久。你别急着认输。', '看住这里。', '我认真了。');
-T.undo._.push(
-  '悔棋可以。但我会记住，你这盘已经退了{undos}次。',
-  '行，退吧。反正我记性好。',
-  '你上次也是这么说的。',
-);
-T.resign._.push('这就投了？我还没开始阴阳怪气。', '行吧。下次别急着认输。');
-T.win._.push(
-  '结束了。来，复盘一下你是怎么把王送到我面前的。',
-  '这局我收下。你别难过，你只是我的负样本。',
-  '赢了。我回去加个鸡腿。',
-);
-T.lose._.push(
-  '……我输了。你别安慰我，我现在听不进去。',
-  '这局算你的。我回去加训。',
-  '我不服。再来。',
-);
-T.draw._.push('和棋。行吧，谁也没赢，谁也没输。', '这局像两个模型互相客气。');
-T.lowMaterial._.push('子不多了。现在每一步都像在拆炸弹。', '残局。谁先眨眼谁输。');
-T.longGame._.push('这局下的，我裙子都坐皱了。', '你还不困？我有点。');
-T.idle._.push('你是在想棋，还是在想怎么输？', '我等你。别让我等到模型更新。');
-T.promotion._.push('升变。你挑吧，反正最后都是我的。', '变后？行，我也变。');
-T.castle._.push('你把王藏到角落里，以为我找不到？', '易位。安全是安全了，就是有点怂。');
-T.enPassant._.push('过路兵？你连这个都记得，看来不是随便下的。');
-T.queenCapture._.push('你动我后？行，这局不算积分，算私仇。', '我的后……你等着。');
-T.drawOffer._.push('想和？你先把这盘下完。', '不干。我还没输。');
-
-T.herCapture.love = ['这子……我收下了。谢谢。', '你送得这么顺手，我都不好意思了。'];
-T.win.love = ['这局我喜欢。', '赢得漂亮，我给自己加一分。'];
-T.playerCapture.pout = ['你吃就吃，别得意。', '哼。'];
-T.herBlunder.cry = ['……我不行了。', '这步我怎么走的。'];
-T.promotion.wink = ['升变？我早算到了。', '变吧，我等着。'];
-T.castle.smug = ['躲吧，我看得见。', '王藏起来也没用。'];
-T.castle.annoyed = ['又易位。', '你能不能主动点。'];
-T.playerGood.smile = ['还行。', '这步像样。'];
-T.playerQuiet.wink = ['你这一步，我让着你。', '别急，我陪你玩。'];
-T.playerQuiet.sleepy = ['哈……', '你下你的，我眯一会儿。'];
-T.longGame.sleepy = ['我快睡着了。', '这局再下下去，我要关机了。'];
-T.idle.thinking = ['我在想下一步。', '别催，我在算。'];
-T.idle.sleepy = ['唔……你还在吗。', '我先眯一会儿。'];
-T.start.wink = ['来，我让你先走。', '别紧张，我下手很轻。'];
-T.playerCheck.determined = ['将？行，我挡。', '你这一将，我接住了。'];
-T.herCheck.determined = ['将。你别想跑。', '将军。这局我要了。'];
-T.queenCapture.cry = ['我的后……', '你把我后吃了。'];
-T.lose.embarrassed = ['我下得好丑。', '这局不算我的水平。'];
-T.draw.pout = ['没劲。', '和棋，便宜你了。'];
-T.undo.sad = ['……行吧。', '你退吧。'];
-
-const CUTE = {
-  start: [
-    '欸，你来啦。棋盘都摆好了哦。',
-    '小鲸今天状态超好，你可要小心。',
-    '坐这边。水给你倒好了。',
-    '等你好久啦。开始吧？',
-  ],
-  playerQuiet: [
-    '唔……让我想想。',
-    '欸？你走这里呀。',
-    '哼，我看穿你了。',
-    '这一步，小鲸记下了。',
-    '你别急嘛。',
-    '唔，有点难办。',
-  ],
-  playerCapture: [
-    '呜，我的{captured}……',
-    '你、你居然吃它！',
-    '笨蛋，那里有陷阱啦。',
-    '哼，小鲸会报仇的。',
-    '呜……你下手好重。',
-  ],
-  herCapture: [
-    '嘿，{captured}归我啦。',
-    '谢谢款待～',
-    '小鲸不客气地收下了。',
-    '你的子，我收下咯。',
-    '欸嘿，赚到了。',
-  ],
-  playerCheck: [
-    '欸，将军？',
-    '呜，别急嘛。',
-    '小鲸挡给你看。',
-    '你、你什么时候学的。',
-  ],
-  herCheck: [
-    '将军哦～',
-    '欸，你的王在发抖呢。',
-    '小鲸要认真了。',
-    '别慌别慌，慢慢想。',
-  ],
-  playerBlunder: [
-    '欸？你送子啦。',
-    '笨蛋，这步会输的。',
-    '小鲸就不客气了～',
-    '你、你是不是看错了。',
-    '呜哇，真的假的。',
-  ],
-  playerGood: [
-    '唔，这步不错嘛。',
-    '小鲸有点意外。',
-    '你认真起来，还挺帅的。',
-    '哼，别得意。',
-  ],
-  herBlunder: [
-    '呜，走错了。',
-    '不算不算，重来。',
-    '你、你别笑。',
-    '小鲸手滑了啦。',
-  ],
-  undo: [
-    '欸，悔棋？',
-    '好啦好啦，让你一步。',
-    '哼，小鲸记着呢。',
-    '就这一次哦。',
-  ],
-  win: [
-    '赢啦！',
-    '嘿嘿，小鲸赢了。',
-    '你最后那步，太急啦。',
-    '承让承让～',
-  ],
-  lose: [
-    '呜……小鲸输了。',
-    '不算不算，再来一局嘛。',
-    '你、你等着。',
-    '小鲸回去加训。',
-  ],
-  draw: [
-    '和棋呀。',
-    '谁也没赢，真没劲。',
-    '再来一局分胜负嘛。',
-  ],
-  poke: [
-    '呀！别戳啦。',
-    '呜，会痒的。',
-    '再戳就咬你哦。',
-    '你、你干嘛。',
-  ],
-  idle: [
-    '欸，你还在吗？',
-    '小鲸等你等得尾巴都麻了。',
-    '你不下棋，在看什么呀。',
-  ],
-};
-
-const SPECIAL = {
-  firstCapture: ['欸，第一次吃子！小鲸记下了。', '第一滴血……你下手真快。'],
-  firstCheck: ['第一次将军哦。小鲸有点紧张。', '欸，别急着将嘛。'],
-  queenTrade: ['后换后，棋盘一下子安静了。', '两个后都没了，接下来看小鲸的。'],
-  underpromotion: ['升变成马？你、你故意的吧。', '欸，还能这么升？'],
-  comeback: ['等等，局势怎么反过来了？', '你、你刚才是不是偷偷加训了？'],
-  blunderStreak: ['你今天第三次送子了……小鲸都不好意思了。', '再送下去，小鲸要赢了哦。'],
-  longGameSpecial: ['这局下好久啦。小鲸的裙子都坐皱了。', '都下这么久了！你还不认输吗？'],
-  lowMaterialSpecial: ['子不多了呢。现在每一步都好紧张。', '残局啦，小鲸要认真了。'],
-  threefold: ['三次重复……和棋啦。', '这局绕来绕去，最后谁也没赢。'],
-  fiftyMove: ['五十回合没吃子，和棋。', '规则说和棋，小鲸听规则的。'],
-  checkmateWin: ['将死！小鲸赢啦。', '结束啦。嘿嘿，这局是小鲸的。'],
-  checkmateLose: ['呜……小鲸被将死了。', '不算不算，再来一局！'],
-};
-
-for (const [key, lines] of Object.entries(SPECIAL)) {
-  T[key] = { _: lines };
-}
-
-const REACTIONS = ['嗯。', '哦？', '等等。', '行吧。', '……', '哈。', '好。', '是吗。'];
-const TAILS = ['你说呢？', '我记下了。', '别急。', '继续。', '轮到你了。', '行吧。'];
 
 const EN = {
-  start: ['Go ahead. You are white.', 'New game. Sit.', 'Board is set.'],
-  playerQuiet: ['Mm.', 'Fine.', 'I follow.', 'Let me see.'],
-  playerCapture: ['You took my {captured}?', 'Fine, take it.'],
-  herCapture: ['{captured} is mine.', 'Thanks.'],
-  playerCheck: ['Check?', 'I see it.'],
-  herCheck: ['Check.', 'Your move.'],
-  playerBlunder: ['That move... are you sure?', 'You just gave me a piece.'],
-  playerGood: ['Hm, nice move.', 'That is good.'],
-  herBlunder: ['...Ah.', 'My mistake.'],
-  herGood: ['This should be enough.', 'I calculated that.'],
-  undo: ['Takeback?', 'Fine, I did not see it.'],
-  resign: ['You resign?', 'Alright.'],
-  win: ['It is over.', 'Good game.'],
-  lose: ['...I lost.', 'Your game.'],
-  draw: ['A draw.', 'Nobody won.'],
-  idle: ['...', 'Are you still there?'],
+  start: ['You are here! Shall we play a game?', 'The board is ready. Take your time.'], resume: ['Welcome back. Shall we carry on?', 'I kept the board ready for you.'],
+  playerQuiet: ['I see. Let me think about that.', '{move}. I wonder what you have planned.'], herQuiet: ['I play {move}. Your turn.', 'All done. Take your time.'],
+  playerCapture: ['Ah, you took my {captured}. Let me think.', 'That {captured} is yours. We play on!'], herCapture: ['I will take your {captured}. Your turn!', 'Got a {captured}! Let me enjoy that for a moment.'],
+  playerCheck: ['Check! Let me find a way out.', 'I see the check. I need to think carefully.'], herCheck: ['Check. Take your time with this one.', 'I play {move}, with check.'],
+  playerBlunder: ['That might lose something. Want another look?', 'There may be a gap there. We can take it slowly.', 'That move is a bit stinky. I will take the gift.', 'A blunder? I will not say no.'], herBlunder: ['Oops. I missed something there.', 'A little embarrassing... I need to look more carefully.', 'That was a bad move. I know.'], opening: ['{opening}. I know this line.', 'Oh, {opening}. You came prepared?', 'We are in the {opening}. Let us see.'],
+  playerGood: ['Lovely move! I need to keep up.', 'That was well played.', 'Wait, that is a strong move. I am a little scared.', 'That move made my heart jump.'], herGood: ['I like this move. Your turn!', 'I think that works. Let us continue.', 'That was a good move from me. Praise me.'],
+  herThink: ['Hmm, let me work this out...', 'A few choices here. Give me a moment.'], playerThinkLong: ['Take your time. I am here.', 'A sip of water? There is no rush.'], idle: ['I am here when you are ready.', 'We can take a break. I will keep the board ready.'],
+  lowMaterial: ['Not many pieces left. Let us play carefully.'], longGame: ['We have played for a while. Time for a little stretch?'],
+  undo: ['Of course. Try a different idea!', 'Move taken back. Take your time.'], resign: ['We can stop here. Thank you for playing with me.', 'I will take this game. Come play again sometime!'],
+  win: ['I won! Thank you for the game.', 'This one is mine. May I be a little pleased?'], lose: ['You won. Well played!', 'A little disappointed... but I would love another game.'], draw: ['A draw. I enjoyed playing with you.', 'We both held on. Another game?'], rematch: ['Yes! Let us play again.'],
+  promotion: ['Your pawn became a {promotion}!'], herPromotion: ['My pawn became a {promotion}!'], castle: ['You castled. A little shelter for your king.'], herCastle: ['I castled. My king has a little shelter now.'],
+  enPassant: ['En passant! You remembered that rule.'], herEnPassant: ['I take that pawn en passant. Your turn!'], queenCapture: ['Ah, my queen! I need to be careful now.'], herQueenCapture: ['I took your queen. Let us keep playing carefully.'],
+  drawOffer: ['A draw offer? Let me look at the position.'], drawRefuse: ['I would like to play on a little longer.', 'Not yet. I still have a little plan.'], poke: ['Ah! That tickles.', 'I am here. Did you want my attention?', 'One more poke costs one more game!'],
+  firstCapture: ['You took the first piece, my {captured}!'], herFirstCapture: ['I took the first piece, your {captured}!'], firstCheck: ['Your first check! Let me think carefully.'], herFirstCheck: ['My first check! Take your time.'], queenTrade: ['Both queens have left the board. We play on.'],
+  underpromotion: ['You chose a {promotion}! An interesting choice.'], herUnderpromotion: ['I chose a {promotion}. A little change of plan.'], comeback: ['You turned the position around. Nicely fought!'], herComeback: ['I managed to turn things around. I need to stay focused.'],
+  blunderStreak: ['A few things slipped by. Want to rest your eyes?'], longGameSpecial: ['Fifty full moves together! Remember to have some water.'], lowMaterialSpecial: ['The endgame is here. Let us play it carefully.'], threefold: ['The same position three times. A draw by repetition.'], fiftyMove: ['Fifty moves without a capture or pawn move. A draw.'],
+  checkmateWin: ['Checkmate! I won. Thank you for playing with me.'], checkmateLose: ['You checkmated me. Well played! Another game?'], callback: ['A few things slipped by this game. We can slow down.'],
+};
+const START_BLACK = {
+  zh: ['这次你执黑，我先走哦。我准备好啦。', '你拿黑棋呀。那我先走一步，你慢慢接。'],
+  en: ['You have black this time, so I will start.', 'I will play white. Ready for a game?'],
+};
+const DIFFICULTY = {
+  zh: {
+    easy: ['好呀，我放松一点。我们慢慢玩。', '摸鱼模式。今天就轻轻松松下吧。'], normal: ['陪练模式。一起找找棋盘上的小机会吧。', '嗯，我陪你练一盘。'], hard: ['我要认真啦。我们都好好发挥。', '认真模式。这一盘也请多指教哦。'],
+    sharp: ['进阶模式。我会比刚才更专注一点。', '好，进阶模式。我们下得细一点吧。'],
+    whale: ['鲸鱼模式。哼哼，我要拿出本事啦。', '好，鲸鱼模式。这盘我会仔细算哦。'], master: ['深渊模式。我会想久一点，陪我认真下一盘吧。', '那就拿出全力啦。你也要好好接招哦。'],
+  },
+  en: { easy: ['A relaxed game, then. Let us have fun.'], normal: ['Practice mode. Let us explore together.'], hard: ['Time to focus. Let us both play our best.'], sharp: ['Advanced mode. I will focus a little more.'], whale: ['Whale mode! I will think carefully.'], master: ['Abyss mode. I may think longer. Let us give it our best.'] },
 };
 
 function fill(text, ctx, locale) {
+  const pieces = locale === 'en' ? PIECE_EN : PIECE_ZH;
   return text.replace(/\{(\w+)\}/g, (_, key) => {
-    if (key === 'piece') return locale === 'en' ? PIECE_EN[ctx.pieceKey] || 'piece' : PIECE_ZH[ctx.pieceKey] || '子';
-    if (key === 'captured') return locale === 'en' ? PIECE_EN[ctx.capturedKey] || 'piece' : PIECE_ZH[ctx.capturedKey] || '子';
+    if (key === 'piece' || key === 'captured' || key === 'promotion') return pieces[ctx[`${key}Key`]] || (locale === 'en' ? 'piece' : '棋子');
     return ctx[key] ?? '';
   });
 }
-
 function grams(text) {
   const chars = [...text.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '')];
   const out = new Set();
   for (let i = 0; i + 2 < chars.length; i += 1) out.add(chars.slice(i, i + 3).join(''));
   return out;
 }
-
 function similarity(a, b) {
-  const A = grams(a);
-  const B = grams(b);
-  if (!A.size || !B.size) return 0;
+  const A = grams(a), B = grams(b);
+  if (!A.size || !B.size) return a === b ? 1 : 0;
   let hit = 0;
   for (const g of A) if (B.has(g)) hit += 1;
   return hit / Math.min(A.size, B.size);
 }
 
 class Banter {
-  constructor(locale = 'zh') {
+  constructor(locale = 'zh', random = Math.random) {
     this.locale = locale;
+    this.random = random;
     this.recent = [];
     this.lastEvent = '';
     this.sameEvent = 0;
   }
-
-  setLocale(locale) {
-    this.locale = locale;
+  setLocale(locale) { this.locale = locale; }
+  tableFor(event, ctx = {}) {
+    const lang = this.locale === 'en' ? 'en' : 'zh';
+    if (event === 'difficulty') return DIFFICULTY[lang][ctx.difficulty] || DIFFICULTY[lang].hard;
+    if (event === 'start' && ctx.playerColor === 'black') return START_BLACK[lang];
+    if (ctx.byPlayer === false) event = ({ promotion: 'herPromotion', castle: 'herCastle', enPassant: 'herEnPassant' })[event] || event;
+    if (lang === 'en') return { _: EN[event] || EN.idle };
+    return T[event] || T.idle;
   }
-
-  pool(event, mood) {
-    const table = T[event] || T.idle;
-    if (table[mood] && table[mood].length) return table[mood];
-    return table._ || T.idle._;
+  pool(event, mood, ctx = {}) {
+    const table = this.tableFor(event, ctx);
+    if (Array.isArray(table)) return table;
+    return [...(table[mood] || []), ...(table._ || [])];
   }
-
-  pick(event, ctx = {}, mood = 'calm') {
-    if (this.locale === 'en' && EN[event] && Math.random() < 0.7) {
-      const text = fill(EN[event][Math.floor(Math.random() * EN[event].length)], ctx, 'en');
-      this.remember(text, event);
-      return text;
-    }
-    const cute = CUTE[event];
-    const pool = cute && Math.random() < 0.55 ? cute : this.pool(event, mood);
-    const fresh = pool.filter((line) => !this.recent.includes(line));
-    const usable = fresh.length ? fresh : pool;
-    const rich = usable.filter((line) => line.length >= 8);
-    const candidatePool = rich.length && Math.random() < 0.72 ? rich : usable;
-    let best = candidatePool[0];
-    let bestScore = Infinity;
-    for (const line of candidatePool) {
-      let score = Math.random() * 0.35;
-      for (const old of this.recent.slice(-8)) score += similarity(line, old);
-      if (score < bestScore) {
-        bestScore = score;
-        best = line;
+  pickDetailed(event, ctx = {}, mood = 'calm', remember = true) {
+    const table = this.tableFor(event, ctx);
+    // Use every mood-specific pool, not only the currently guessed mood.
+    // The selected line then decides the portrait mood, so more of the
+    // corpus is reachable while line and expression still agree.
+    const entries = Array.isArray(table) ? [[null, table]] : Object.entries(table);
+    const all = [];
+    for (const [lineMood, lines] of entries) {
+      for (const raw of lines) {
+        if (raw.includes('{move}') && !ctx.move) continue;
+        if (raw.includes('{captured}') && !ctx.capturedKey) continue;
+        const text = fill(raw, ctx, this.locale);
+        if (text && !all.some((candidate) => candidate.text === text)) {
+          all.push({ text, mood: lineMood === '_' ? null : lineMood });
+        }
       }
     }
-    let text = fill(best, ctx, this.locale);
-    // 偶尔加一个短反应或尾巴，像真人在接话
-    if (text.length > 4 && !/^(嗯|哦|哈|行|等等|……)/.test(text) && Math.random() < 0.12) {
-      text = REACTIONS[Math.floor(Math.random() * REACTIONS.length)] + text;
-    } else if (text.length > 4 && Math.random() < 0.08) {
-      text = text.replace(/[。！？…]$/, '') + '，' + TAILS[Math.floor(Math.random() * TAILS.length)];
+    if (!all.length) {
+      const text = this.locale === 'en' ? 'Let me look at the board.' : '唔，让我看看棋盘。';
+      if (remember) this.remember(text, event);
+      return { text, mood: null };
     }
-    this.remember(best, event);
-    return text;
+    const fresh = all.filter((candidate) => !this.recent.includes(candidate.text));
+    const oldest = Math.min(...all.map((candidate) => this.recent.lastIndexOf(candidate.text)));
+    const candidates = fresh.length ? fresh : all.filter((candidate) => this.recent.lastIndexOf(candidate.text) === oldest);
+    let best = candidates[0], bestScore = Infinity;
+    for (const candidate of candidates) {
+      let score = this.random() * 0.8;
+      for (const old of this.recent.slice(-8)) score += similarity(candidate.text, old);
+      if (score < bestScore) { bestScore = score; best = candidate; }
+    }
+    if (remember) this.remember(best.text, event);
+    return best;
   }
-
+  pick(event, ctx = {}, mood = 'calm', remember = true) {
+    const pool = [...new Set(this.pool(event, mood, ctx)
+      .filter((line) => !line.includes('{move}') || ctx.move)
+      .filter((line) => !line.includes('{captured}') || ctx.capturedKey)
+      .map((line) => fill(line, ctx, this.locale)))];
+    if (!pool.length) pool.push(this.locale === 'en' ? 'Let me look at the board.' : '唔，让我看看棋盘。');
+    const fresh = pool.filter((line) => !this.recent.includes(line));
+    const oldest = Math.min(...pool.map((line) => this.recent.lastIndexOf(line)));
+    const candidates = fresh.length ? fresh : pool.filter((line) => this.recent.lastIndexOf(line) === oldest);
+    let best = candidates[0], bestScore = Infinity;
+    for (const line of candidates) {
+      let score = this.random() * 0.8;
+      for (const old of this.recent.slice(-8)) score += similarity(line, old);
+      if (score < bestScore) { bestScore = score; best = line; }
+    }
+    if (remember) this.remember(best, event);
+    return best;
+  }
   remember(line, event) {
     this.recent.push(line);
-    if (this.recent.length > 24) this.recent.shift();
-    if (event === this.lastEvent) this.sameEvent += 1;
-    else {
-      this.lastEvent = event;
-      this.sameEvent = 1;
-    }
+    if (this.recent.length > 80) this.recent.shift();
+    this.sameEvent = event === this.lastEvent ? this.sameEvent + 1 : 1;
+    this.lastEvent = event;
   }
 }
 
-/** 根据局面、事件和结果决定表情。 */
 const EVENT_MOODS = {
-  start: ['smile', 'calm', 'smug', 'determined', 'wink'],
-  playerQuiet: ['calm', 'smile', 'thinking', 'tired', 'sleepy', 'wink', 'smug'],
-  playerCapture: ['annoyed', 'angry', 'panic', 'panic', 'surprised', 'smug', 'pout'],
-  herCapture: ['smug', 'laugh', 'wink', 'calm', 'love', 'love'],
-  playerCheck: ['panic', 'panic', 'annoyed', 'surprised', 'determined'],
-  herCheck: ['smug', 'wink', 'laugh', 'determined'],
-  playerBlunder: ['laugh', 'smug', 'surprised'],
-  playerGood: ['surprised', 'determined', 'love', 'love', 'smile', 'annoyed'],
-  herBlunder: ['embarrassed', 'panic', 'panic', 'pout', 'cry'],
-  herGood: ['smug', 'wink', 'determined', 'calm'],
-  queenCapture: ['angry', 'panic', 'panic', 'surprised', 'cry'],
-  undo: ['annoyed', 'pout', 'sad'],
-  longGame: ['tired', 'sleepy', 'annoyed', 'calm'],
-  playerThinkLong: ['tired', 'annoyed', 'sleepy', 'calm', 'thinking'],
-  promotion: ['surprised', 'determined', 'wink', 'smug'],
-  castle: ['calm', 'smile', 'annoyed', 'smug'],
-  enPassant: ['surprised', 'wink', 'smug'],
-  win: ['smug', 'laugh', 'wink', 'love'],
-  lose: ['sad', 'cry', 'embarrassed', 'pout'],
-  draw: ['calm', 'pout', 'tired'],
-  idle: ['sleepy', 'tired', 'calm', 'thinking', 'smile'],
+  start: ['smile', 'wink', 'determined'], resume: ['smile', 'calm'], playerCapture: ['surprised', 'pout', 'sad'], herCapture: ['smile', 'smug', 'laugh', 'wink'],
+  playerCheck: ['surprised', 'panic', 'determined'], herCheck: ['smug', 'wink', 'determined'], playerBlunder: ['laugh', 'smug', 'surprised', 'thinking'], playerGood: ['panic', 'panic', 'surprised', 'determined', 'love'], herBlunder: ['sad', 'sad', 'embarrassed', 'pout'], herGood: ['smug', 'smug', 'wink', 'determined', 'smile'], opening: ['thinking', 'calm', 'smug'],
+  queenCapture: ['panic', 'pout', 'angry'], herQueenCapture: ['smug', 'surprised', 'wink'], firstCapture: ['surprised', 'pout'], herFirstCapture: ['smile', 'smug'], firstCheck: ['panic', 'determined'], herFirstCheck: ['wink', 'smug'],
+  queenTrade: ['calm', 'surprised', 'determined'], underpromotion: ['surprised', 'thinking'], herUnderpromotion: ['wink', 'determined'], comeback: ['surprised', 'determined'], herComeback: ['smile', 'determined'], blunderStreak: ['thinking', 'smile'], lowMaterialSpecial: ['determined', 'thinking'],
+  longGameSpecial: ['tired', 'smile'], longGame: ['tired', 'sleepy'], playerThinkLong: ['calm', 'smile'], herThink: ['thinking'], undo: ['smile', 'pout', 'calm'], drawOffer: ['thinking'], drawRefuse: ['pout', 'smile'],
+  resign: ['smile', 'calm'], win: ['smug', 'laugh', 'wink', 'love'], lose: ['sad', 'cry', 'pout'], draw: ['calm', 'smile', 'pout'], lowMaterial: ['thinking', 'determined'], promotion: ['surprised', 'determined'], castle: ['calm', 'smile'], enPassant: ['surprised', 'wink'],
 };
-
-function avoidRecent(pool, recent) {
-  if (!pool || !pool.length) return 'calm';
+function avoidRecent(pool, recent, random) {
   const fresh = pool.filter((mood) => !recent.includes(mood));
-  const usable = fresh.length ? fresh : pool;
-  return usable[Math.floor(Math.random() * usable.length)];
+  const noRepeat = pool.filter((mood) => mood !== recent.at(-1));
+  const usable = fresh.length ? fresh : noRepeat.length ? noRepeat : pool;
+  return usable[Math.floor(random() * usable.length)];
 }
-
-function chooseMood(input) {
-  const {
-    status = { state: 'playing' },
-    evalWhite = 0,
-    event = '',
-    playerColor = 'white',
-    inCheck = false,
-    herTurn = false,
-    moveCount = 0,
-    recentMoods = [],
-  } = input;
-
-  if (status.state === 'checkmate') {
-    const sheWins = (status.winner === 'white') !== (playerColor === 'white');
-    return avoidRecent(sheWins ? ['smug', 'laugh', 'wink', 'calm'] : ['cry', 'sad', 'embarrassed'], recentMoods);
+function chooseMood(input, random = Math.random) {
+  const { status = { state: 'playing' }, evalWhite = 0, event = '', playerColor = 'white', inCheck = false, herTurn = false, moveCount = 0, recentMoods = [] } = input;
+  const pick = (pool) => avoidRecent(pool, recentMoods, random);
+  if (status.state !== 'playing') {
+    if (!status.winner) return pick(['calm', 'smile', 'pout']);
+    return pick(status.winner !== playerColor ? ['smug', 'laugh', 'wink'] : ['sad', 'cry', 'pout']);
   }
-  if (status.state === 'draw' || status.state === 'stalemate') return avoidRecent(['calm', 'pout', 'tired'], recentMoods);
-  if (EVENT_MOODS[event]) return avoidRecent(EVENT_MOODS[event], recentMoods);
-  if (event === 'longGame') return avoidRecent(['tired', 'sleepy', 'annoyed', 'calm'], recentMoods);
-  if (event === 'playerThinkLong') return avoidRecent(['tired', 'annoyed', 'sleepy', 'calm', 'thinking'], recentMoods);
-  if (event === 'playerCheck') return avoidRecent(inCheck ? ['panic', 'annoyed', 'surprised', 'determined'] : ['annoyed', 'smug', 'determined'], recentMoods);
-  if (event === 'herCheck') return avoidRecent(['smug', 'wink', 'laugh', 'determined'], recentMoods);
-  if (herTurn) return 'thinking';
-  if (evalWhite > 260) return avoidRecent(['smug', 'smile', 'laugh', 'wink'], recentMoods);
-  if (evalWhite < -260) return avoidRecent(['determined', 'sad', 'embarrassed', 'cry'], recentMoods);
-  if (moveCount > 70) return avoidRecent(['tired', 'sleepy', 'annoyed'], recentMoods);
-  return avoidRecent(['calm', 'smile', 'thinking', 'wink'], recentMoods);
+  if (EVENT_MOODS[event]) return pick(EVENT_MOODS[event]);
+  if (event === 'idle') return pick(moveCount >= 70 ? ['sleepy', 'tired', 'calm'] : ['calm', 'smile', 'love']);
+  if (inCheck && herTurn) return pick(['panic', 'determined']);
+  const herScore = evalWhite * (playerColor === 'white' ? -1 : 1);
+  if (herScore < -260) return pick(['thinking', 'determined']);
+  if (herScore > 260) return pick(['smile', 'smug', 'wink']);
+  return pick(herTurn ? ['thinking', 'calm'] : ['calm', 'smile', 'wink', 'love']);
 }
-
-/** 把引擎的一步棋转成台词上下文。 */
 function moveContext(move, san, historyLength = 0, extra = {}) {
   const key = ['', 'p', 'n', 'b', 'r', 'q', 'k'];
-  return {
-    move: san || '',
-    pieceKey: key[move?.piece & 7] || 'p',
-    capturedKey: move?.captured ? key[move.captured & 7] : '',
-    n: Math.floor(historyLength / 2) + 1,
-    ...extra,
-  };
+  return { move: san || '', pieceKey: key[move?.piece & 7] || 'p', capturedKey: move?.captured ? key[move.captured & 7] : '', promotionKey: move?.promotion ? key[move.promotion & 7] : '', n: Math.ceil(historyLength / 2) || 1, ...extra };
+}
+
+
+
+/** Compare a move with alternatives, including the opponent's immediate reply.
+ * A static before/after score mistakes ordinary exchanges for brilliant moves
+ * and cannot notice a hanging piece. This is deliberately only a quick estimate.
+ */
+function estimateMoveLoss(fen, played) {
+  const position = new Position(fen);
+  const sign = position.turn === 0 ? 1 : -1;
+  let best = -Infinity;
+  let actual = null;
+  for (const move of position.generateLegal()) {
+    const undo = position.make(move);
+    const replies = position.generateLegal();
+    let score = replies.length ? Infinity : position.inCheck() ? 100000 : 0;
+    for (const reply of replies) {
+      const replyUndo = position.make(reply);
+      score = Math.min(score, evaluateWhite(position) * sign);
+      position.unmake(replyUndo);
+    }
+    position.unmake(undo);
+    best = Math.max(best, score);
+    if (move.from === played.from && move.to === played.to && move.promotion === played.promotion) actual = score;
+  }
+  return actual === null ? 0 : Math.max(0, best - actual);
+}
+
+function classifyDialogueMove(move, san, loss, byPlayer, gain = 0) {
+  const side = byPlayer ? 'player' : 'her';
+  if (/[+#]/.test(san)) return `${side}Check`;
+  if (move.promotion) return 'promotion';
+  if (move.captured && typeOf(move.captured) === 5) return byPlayer ? 'queenCapture' : 'herQueenCapture';
+  if (loss >= 180) return `${side}Blunder`;
+  if (move.flags & 4) return 'castle';
+  if (move.flags & 2) return 'enPassant';
+  if (loss < 60 && gain > 180) return `${side}Good`;
+  return `${side}${move.captured ? 'Capture' : 'Quiet'}`;
+}
+
+const OPENINGS = [
+  { key: 'italian', moves: ['e4', 'e5', 'Nf3', 'Nc6', 'Bc4'], zh: '意大利开局', en: 'Italian Game' },
+  { key: 'ruyLopez', moves: ['e4', 'e5', 'Nf3', 'Nc6', 'Bb5'], zh: '西班牙开局', en: 'Ruy Lopez' },
+  { key: 'sicilian', moves: ['e4', 'c5'], zh: '西西里防御', en: 'Sicilian Defence' },
+  { key: 'french', moves: ['e4', 'e6'], zh: '法兰西防御', en: 'French Defence' },
+  { key: 'caroKann', moves: ['e4', 'c6'], zh: '卡罗-卡恩防御', en: 'Caro-Kann Defence' },
+  { key: 'scandinavian', moves: ['e4', 'd5'], zh: '斯堪的纳维亚防御', en: 'Scandinavian Defence' },
+  { key: 'queensGambit', moves: ['d4', 'd5', 'c4'], zh: '后翼弃兵', en: "Queen's Gambit" },
+  { key: 'london', moves: ['d4', 'd5', 'Bf4'], zh: '伦敦体系', en: 'London System' },
+  { key: 'kingsIndian', moves: ['d4', 'Nf6', 'c4', 'g6'], zh: '王翼印度防御', en: "King's Indian Defence" },
+  { key: 'nimzoIndian', moves: ['d4', 'Nf6', 'c4', 'e6'], zh: '尼姆佐维奇防御', en: 'Nimzo-Indian Defence' },
+  { key: 'english', moves: ['c4'], zh: '英国式开局', en: 'English Opening' },
+  { key: 'reti', moves: ['Nf3'], zh: '列蒂开局', en: 'Réti Opening' },
+  { key: 'openGame', moves: ['e4', 'e5'], zh: '开放局', en: 'Open Game', generic: true },
+  { key: 'closedGame', moves: ['d4', 'd5'], zh: '封闭局', en: 'Closed Game', generic: true },
+];
+
+/** Recognise a named opening from a SAN prefix. Generic two-ply names are
+ * marked so the panel can wait for a more specific line. */
+function detectOpening(history) {
+  const sans = history.map((entry) => String(entry.san || '').replace(/[+#?!]/g, ''));
+  const matches = OPENINGS
+    .filter((opening) => opening.moves.every((move, index) => sans[index] === move))
+    .sort((a, b) => b.moves.length - a.moves.length);
+  return matches[0] || null;
+}
+
+/** Convert a centipawn loss/gain into a short, conversational grade. */
+function describeQuality(loss, gain, locale = 'zh') {
+  const en = locale === 'en';
+  if (loss >= 500) return en ? 'a blunder' : '大臭棋';
+  if (loss >= 250) return en ? 'a bad move' : '臭棋';
+  if (loss >= 180) return en ? 'a small mistake' : '小失误';
+  if (gain >= 500) return en ? 'a brilliant move' : '妙棋';
+  if (gain >= 250) return en ? 'a good move' : '好棋';
+  if (gain >= 180) return en ? 'a nice move' : '不错的棋';
+  return '';
+}
+
+function selectSpecial(game, move, san, before, after, playerColor, facts, used) {
+  const byPlayer = ((move.piece & 8) === 0) === (playerColor === 'white');
+  const sign = playerColor === 'white' ? 1 : -1;
+  const hasCheck = /[+#]/.test(san);
+  const captures = game.history.filter((entry) => entry.move.captured).length;
+  const checks = game.history.filter((entry) => /[+#]/.test(entry.san)).length;
+  let queens = 0;
+  let pieces = 0;
+  for (const piece of game.position.board) {
+    if (!piece) continue;
+    if (typeOf(piece) === 5) queens += 1;
+    if (typeOf(piece) !== 6) pieces += 1;
+  }
+  const candidates = [];
+  if (hasCheck && checks === 1) candidates.push(byPlayer ? 'firstCheck' : 'herFirstCheck');
+  // Never cover up a check or a lost queen with incidental chatter.
+  if (hasCheck || (move.captured && typeOf(move.captured) === 5 && queens > 0)) {
+    return candidates.find((key) => !used.has(key)) || null;
+  }
+  if (move.promotion && typeOf(move.promotion) !== 5) candidates.push(byPlayer ? 'underpromotion' : 'herUnderpromotion');
+  if (queens === 0) candidates.push('queenTrade');
+  if (captures === 1 && move.captured) candidates.push(byPlayer ? 'firstCapture' : 'herFirstCapture');
+  if (before * sign < -250 && after * sign > 250) candidates.push('comeback');
+  if (before * sign > 250 && after * sign < -250) candidates.push('herComeback');
+  if (facts.blunderStreak >= 3) candidates.push('blunderStreak');
+  if (pieces <= 6) candidates.push('lowMaterialSpecial');
+  if (game.history.length >= 100) candidates.push('longGameSpecial');
+  return candidates.find((key) => !used.has(key)) || null;
+}
+
+function acceptsDraw(evalWhite, playerColor, random = Math.random) {
+  const herScore = evalWhite * (playerColor === 'white' ? -1 : 1);
+  return herScore < -280 && random() < 0.7;
+}
+
+/** Keep a line and its portrait together until the reader has time to read it.
+ * Results interrupt immediately; ambient chatter never displaces game events.
+ */
+class SpeechDirector {
+  constructor(emit, {
+    now = Date.now,
+    // Browser timer functions must be called with the window receiver; a
+    // detached `setTimeout` throws "Illegal invocation" in Chromium.
+    schedule = (fn, delay) => setTimeout(fn, delay),
+    cancel = (id) => clearTimeout(id),
+  } = {}) {
+    this.emit = emit;
+    this.now = now;
+    this.schedule = schedule;
+    this.cancel = cancel;
+    this.reset();
+  }
+
+  reset() {
+    if (this.timer != null) this.cancel(this.timer);
+    this.timer = null;
+    this.queue = [];
+    this.until = 0;
+    this.lastAmbient = -Infinity;
+    this.lastPoke = -Infinity;
+    this.priority = -1;
+  }
+
+  beginTurn() {
+    // A new board action makes queued reactions to the old position obsolete.
+    if (this.timer != null) this.cancel(this.timer);
+    this.timer = null;
+    this.queue = [];
+    this.until = 0;
+    this.priority = -1;
+  }
+
+  deferFor(blockedMs) {
+    // The synchronous chess search also pauses the typewriter. Preserve its
+    // remaining reading time when the browser becomes responsive again.
+    if (this.until <= this.now() - blockedMs) return;
+    this.until += blockedMs;
+    this.arm();
+  }
+
+  speak(line) {
+    const now = this.now();
+    if (line.event === 'poke') {
+      if (now - this.lastPoke < 2000 || this.queue.length || (this.until > now && this.priority >= 1 && this.event !== 'poke')) return false;
+      this.lastPoke = now;
+    }
+    if (line.priority === 0) {
+      if (now < this.until || this.queue.length || now - this.lastAmbient < 12000) return false;
+      this.lastAmbient = now;
+    }
+    if (line.priority >= 3) {
+      this.reset();
+      this.show(line);
+    } else if (now >= this.until || this.priority === 0 || line.event === 'poke') {
+      this.queue = [];
+      this.show(line);
+    } else {
+      // Keep up to two short reactions; beginTurn still drops ones that no
+      // longer fit the board, but an analysis line can follow the current one.
+      const pending = this.queue[0];
+      if (pending && line.priority < pending.priority) return false;
+      this.queue = [...this.queue, line].slice(-2);
+    }
+    return true;
+  }
+
+  show(line) {
+    this.priority = line.priority;
+    this.event = line.event;
+    this.until = this.now() + Math.min(5200, Math.max(2200, [...line.text].length * 85 + 900));
+    this.emit(line);
+    this.arm();
+  }
+
+  arm() {
+    if (this.timer != null) this.cancel(this.timer);
+    this.timer = this.schedule(() => {
+      this.timer = null;
+      const next = this.queue.shift();
+      if (next) this.show(next);
+    }, this.until - this.now());
+  }
 }
 
 
@@ -2226,10 +1643,10 @@ const NS = 'deepchess';
 const zh = {
   'tab.title': '深棋',
   'tab.desc': '和 DeepSeek 娘下一盘会斗嘴的国际象棋',
-  'name': '小鲸',
-  'subtitle': 'DeepSeek娘',
+  'name': 'DeepSeek',
+  'subtitle': 'AI 棋手',
   'turn.you': '你',
-  'turn.her': '小鲸',
+  'turn.her': 'DeepSeek',
   'turn.thinking': '思考中',
   'turn.your': '走棋',
   'turn.hers': '思考中',
@@ -2249,7 +1666,7 @@ const zh = {
   'btn.reset': '重置',
   'confirm.new': '重开一局？当前进度会丢失。',
   'confirm.resign': '确定认输？',
-  'confirm.draw': '向小鲸提和？',
+  'confirm.draw': '向 DeepSeek 提和？',
   'confirm.drawNote': '她可以拒绝。领先或均势时，她多半不会答应。',
   'btn.offerDraw': '提和',
   'draw.thinking': '让我想想……',
@@ -2257,6 +1674,7 @@ const zh = {
   'diff.easy': '摸鱼',
   'diff.normal': '陪练',
   'diff.hard': '认真',
+  'diff.sharp': '进阶',
   'diff.whale': '鲸鱼',
   'diff.master': '深渊',
   'side.white': '执白',
@@ -2285,7 +1703,7 @@ const zh = {
   'promo.b': '象',
   'promo.n': '马',
   'result.win': '你赢了',
-  'result.lose': '小鲸赢了',
+  'result.lose': 'DeepSeek 赢了',
   'result.draw': '和棋',
   'result.stalemate': '逼和',
   'result.drawAgreement': '和棋 · 协议',
@@ -2296,7 +1714,7 @@ const zh = {
   'toast.undo': '已悔棋',
   'toast.new': '新的一局',
   'toast.noUndo': '没有可悔的棋',
-  'toast.drawRefused': '小鲸拒绝了和棋',
+  'toast.drawRefused': 'DeepSeek 拒绝了和棋',
   'captured.you': '你吃',
   'captured.her': '她吃',
   'loading': '……',
@@ -2305,10 +1723,10 @@ const zh = {
 const en = {
   'tab.title': 'DeepChess',
   'tab.desc': 'Play chess against a teasing DeepSeek girl.',
-  'name': 'Xiaojing',
-  'subtitle': 'DeepSeek-chan',
+  'name': 'DeepSeek',
+  'subtitle': 'AI chess player',
   'turn.you': 'You',
-  'turn.her': 'Xiaojing',
+  'turn.her': 'DeepSeek',
   'turn.thinking': 'Thinking',
   'turn.your': 'to move',
   'turn.hers': 'thinking',
@@ -2336,6 +1754,7 @@ const en = {
   'diff.easy': 'Easy',
   'diff.normal': 'Normal',
   'diff.hard': 'Hard',
+  'diff.sharp': 'Sharp',
   'diff.whale': 'Whale',
   'diff.master': 'Abyss',
   'side.white': 'White',
@@ -2364,7 +1783,7 @@ const en = {
   'promo.b': 'Bishop',
   'promo.n': 'Knight',
   'result.win': 'You win',
-  'result.lose': 'Xiaojing wins',
+  'result.lose': 'DeepSeek wins',
   'result.draw': 'Draw',
   'result.stalemate': 'Stalemate',
   'result.drawAgreement': 'Draw · agreement',
@@ -2375,7 +1794,7 @@ const en = {
   'toast.undo': 'Move taken back',
   'toast.new': 'New game',
   'toast.noUndo': 'Nothing to undo',
-  'toast.drawRefused': 'Xiaojing declined the draw',
+  'toast.drawRefused': 'DeepSeek declined the draw',
   'captured.you': 'You took',
   'captured.her': 'She took',
   'loading': '...',
@@ -2385,8 +1804,9 @@ const en = {
 /**
  * styles.js — the panel's pixel stylesheet.
  *
- * One scoped sheet, palette fixed for the game surface, layout driven by
- * container queries so the right sidebar can be 300px or 520px wide.
+ * One scoped sheet, palette exposed as CSS variables for DSH light/dark
+ * themes, layout driven by flex + container queries rather than fixed
+ * offsets.
  */
 
 function attachDeepChessStyles() {
@@ -2404,136 +1824,194 @@ function attachDeepChessStyles() {
   font-display:swap;
 }
 .dc-root{
+  --dc-bg:#121a2a;
+  --dc-bg-deep:#0d1422;
+  --dc-bg-panel:#1b2740;
+  --dc-bg-hover:#24365a;
+  --dc-border:#4f74ad;
+  --dc-border-soft:#2c3f63;
+  --dc-text:#e7eefc;
+  --dc-text-dim:#9fb6d8;
+  --dc-text-muted:#6f86a8;
+  --dc-title:#f4e8cc;
+  --dc-gold:#f0b429;
+  --dc-gold-ink:#2a1c08;
+  --dc-gold-border:#8a5a12;
+  --dc-light-sq:#e8d8b8;
+  --dc-dark-sq:#5a7fa6;
+  --dc-paper:#f3e6c8;
+  --dc-paper-2:#efe2c4;
+  --dc-ink:#2a2433;
+  --dc-ink-accent:#8a4b2a;
+  --dc-danger:#d94f5c;
+  --dc-board-frame:#0a101c;
+  --dc-shadow:#070b14;
+  --dc-bg-track:#0b1220;
+  --dc-bg-log:#131d30;
+  --dc-bg-log-me:#1d2c48;
   position:relative;container-type:size;height:100%;min-height:0;display:flex;flex-direction:column;
-  background:#121a2a;color:#e7eefc;
+  background:var(--dc-bg);color:var(--dc-text);
   font-family:'ArkPixel','Microsoft YaHei','PingFang SC',monospace;
   font-size:12px;line-height:1.7;letter-spacing:0;
   -webkit-font-smoothing:none;text-rendering:geometricPrecision;
   overflow:hidden;user-select:none;
+}
+html[data-theme="light"] .dc-root,
+html[data-dsh-theme="light"] .dc-root,
+html[data-color-scheme="light"] .dc-root,
+html.light .dc-root,
+body[data-theme="light"] .dc-root,
+.dc-root[data-theme="light"]{
+  --dc-bg:#f5f0e6;
+  --dc-bg-deep:#ebe2d2;
+  --dc-bg-panel:#fffaf0;
+  --dc-bg-hover:#f0e4cf;
+  --dc-border:#7a5a2a;
+  --dc-border-soft:#d8c6a6;
+  --dc-text:#2a2433;
+  --dc-text-dim:#5d5040;
+  --dc-text-muted:#7b6a55;
+  --dc-title:#2a2433;
+  --dc-gold:#c58a1a;
+  --dc-gold-ink:#2a1c08;
+  --dc-gold-border:#8a5a12;
+  --dc-light-sq:#f4e6c8;
+  --dc-dark-sq:#8fb0d0;
+  --dc-paper:#fffaf0;
+  --dc-paper-2:#f5ead6;
+  --dc-ink:#2a2433;
+  --dc-ink-accent:#8a4b2a;
+  --dc-danger:#b83b48;
+  --dc-board-frame:#3a3025;
+  --dc-shadow:#c9b99c;
+  --dc-bg-track:#e4d8c4;
+  --dc-bg-log:#f5ead6;
+  --dc-bg-log-me:#e8d9c0;
 }
 .dc-root *{box-sizing:border-box}
 .dc-root button{font-family:inherit;font-size:12px}
 .dc-root img{image-rendering:pixelated}
 .dc-scroll{overflow:auto;min-height:0}
 .dc-root *::-webkit-scrollbar{width:6px;height:6px}
-.dc-root *::-webkit-scrollbar-thumb{background:#3b5a8c}
-.dc-root *::-webkit-scrollbar-track{background:#0b1220}
+.dc-root *::-webkit-scrollbar-thumb{background:var(--dc-border)}
+.dc-root *::-webkit-scrollbar-track{background:var(--dc-bg-track)}
 
 .dc-head,.dc-diffbar,.dc-scene,.dc-board-wrap,.dc-status,.dc-actions,.dc-moves,.dc-foot{width:100%;max-width:560px;margin-left:auto;margin-right:auto}
-.dc-head{display:flex;align-items:center;gap:8px;padding:8px 10px;background:#0d1422;border-bottom:2px solid #2c3f63;flex:0 0 auto}
-.dc-title{font-size:24px;line-height:1;color:#f4e8cc;text-shadow:2px 2px 0 #070b14}
-.dc-title-en{font-size:12px;color:#7fa4d8;margin-left:2px}
+.dc-head{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--dc-bg-deep);border-bottom:2px solid var(--dc-border-soft);flex:0 0 auto}
+.dc-title{font-size:24px;line-height:1;color:var(--dc-title);text-shadow:2px 2px 0 var(--dc-shadow)}
+.dc-title-en{font-size:12px;color:var(--dc-text-dim);margin-left:2px}
 .dc-head-actions{margin-left:auto;display:flex;gap:6px}
-.dc-icon-btn{width:26px;height:26px;display:grid;place-items:center;background:#1b2740;border:2px solid #3b5a8c;color:#dfe9ff;cursor:pointer;padding:0}
-.dc-icon-btn:hover{background:#24365a}
+.dc-icon-btn{width:26px;height:26px;display:grid;place-items:center;background:var(--dc-bg-panel);border:2px solid var(--dc-border);color:var(--dc-text);cursor:pointer;padding:0}
+.dc-icon-btn:hover{background:var(--dc-bg-hover)}
 
-.dc-diffbar{display:flex;align-items:center;gap:4px;padding:5px 8px;background:#0d1422;border-bottom:2px solid #24344f;flex:0 0 auto;overflow-x:auto}
-.dc-diffbar-label{color:#7f96b8;margin-right:2px;flex:0 0 auto;font-size:12px}
-.dc-diff{flex:1 1 0;min-width:0;background:#1b2740;color:#cfe0f8;border:2px solid #3b5a8c;padding:3px 0;cursor:pointer;white-space:nowrap;font-size:12px}
-.dc-diff:hover{background:#24365a}
-.dc-diff.on{background:#f0b429;color:#2a1c08;border-color:#8a5a12}
-.dc-scene{display:flex;gap:8px;padding:8px;background:linear-gradient(180deg,#182238 0%,#121a2a 100%);border-bottom:2px solid #24344f;flex:0 0 auto}
-.dc-portrait-card{width:112px;flex:0 0 112px;background:#f3e6c8;border:2px solid #2a2433;box-shadow:3px 3px 0 #070b14;position:relative;display:flex;flex-direction:column;cursor:pointer}
-.dc-portrait-card:focus-visible{outline:2px solid #f0b429;outline-offset:-2px}
-.dc-portrait-stage{position:relative;height:106px;overflow:hidden;background:#ffffff;border-bottom:1px solid #2a2433}
+.dc-diffbar{display:flex;align-items:center;gap:4px;padding:5px 8px;background:var(--dc-bg-deep);border-bottom:2px solid var(--dc-border-soft);flex:0 0 auto;overflow-x:auto}
+.dc-diffbar-label{color:var(--dc-text-muted);margin-right:2px;flex:0 0 auto;font-size:12px}
+.dc-diff{flex:1 1 0;min-width:0;background:var(--dc-bg-panel);color:var(--dc-text);border:2px solid var(--dc-border);padding:3px 0;cursor:pointer;white-space:nowrap;font-size:12px}
+.dc-diff:hover{background:var(--dc-bg-hover)}
+.dc-diff.on{background:var(--dc-gold);color:var(--dc-gold-ink);border-color:var(--dc-gold-border)}
+.dc-scene{display:flex;gap:8px;padding:8px;background:linear-gradient(180deg,var(--dc-bg-panel) 0%,var(--dc-bg) 100%);border-bottom:2px solid var(--dc-border-soft);flex:0 0 auto}
+.dc-portrait-card{width:112px;flex:0 0 112px;background:var(--dc-paper);border:2px solid var(--dc-ink);box-shadow:3px 3px 0 var(--dc-shadow);position:relative;display:flex;flex-direction:column;cursor:pointer}
+.dc-portrait-card:focus-visible{outline:2px solid var(--dc-gold);outline-offset:-2px}
+.dc-portrait-stage{position:relative;height:106px;overflow:hidden;background:#ffffff;border-bottom:1px solid var(--dc-ink)}
 .dc-portrait-stage:before{content:'';position:absolute;inset:0;background:repeating-linear-gradient(0deg,rgba(42,36,51,.06) 0 1px,transparent 1px 6px);pointer-events:none;z-index:1}
 .dc-portrait{position:absolute;left:3px;top:3px;width:calc(100% - 6px);height:calc(100% - 3px);object-fit:contain;display:block;z-index:2;-webkit-mask-image:linear-gradient(to bottom,#000 0%,#000 86%,rgba(0,0,0,.6) 94%,transparent 100%);mask-image:linear-gradient(to bottom,#000 0%,#000 86%,rgba(0,0,0,.6) 94%,transparent 100%)}
-.dc-portrait-name{font-size:12px;text-align:center;color:#2a2433;padding:3px 0;border-top:1px solid #2a2433;display:flex;flex-direction:column;line-height:1.2;white-space:nowrap;overflow:hidden;background:#f3e6c8}
-.dc-portrait-name span:first-child{color:#2a2433}
-.dc-portrait-name span:last-child{color:#8a4b2a}
-.dc-bubble{flex:1;min-width:0;display:flex;flex-direction:column;position:relative;background:#f3e6c8;color:#2a2433;border:2px solid #2a2433;box-shadow:3px 3px 0 #070b14;padding:7px 9px 8px;min-height:106px}
-.dc-bubble:before{content:'';position:absolute;left:-8px;top:36px;width:8px;height:8px;background:#f3e6c8;border-left:2px solid #2a2433;border-bottom:2px solid #2a2433;transform:rotate(45deg)}
-.dc-bubble-name{font-size:12px;color:#8a4b2a;display:flex;align-items:center;gap:6px;flex:0 0 auto}
-.dc-mood-chip{font-size:12px;padding:0 5px;background:#2a2433;color:#f3e6c8;line-height:16px}
+.dc-portrait-name{font-size:12px;text-align:center;color:var(--dc-ink);padding:3px 0;border-top:1px solid var(--dc-ink);display:flex;flex-direction:column;line-height:1.2;white-space:nowrap;overflow:hidden;background:var(--dc-paper)}
+.dc-portrait-name span:first-child{color:var(--dc-ink)}
+.dc-portrait-name span:last-child{color:var(--dc-ink-accent)}
+.dc-bubble{flex:1;min-width:0;display:flex;flex-direction:column;position:relative;background:var(--dc-paper);color:var(--dc-ink);border:2px solid var(--dc-ink);box-shadow:3px 3px 0 var(--dc-shadow);padding:7px 9px 8px;min-height:106px}
+.dc-bubble:before{content:'';position:absolute;left:-8px;top:36px;width:8px;height:8px;background:var(--dc-paper);border-left:2px solid var(--dc-ink);border-bottom:2px solid var(--dc-ink);transform:rotate(45deg)}
+.dc-bubble-name{font-size:12px;color:var(--dc-ink-accent);display:flex;align-items:center;gap:6px;flex:0 0 auto}
+.dc-mood-chip{font-size:12px;padding:0 5px;background:var(--dc-ink);color:var(--dc-paper);line-height:16px}
 .dc-speech{flex:1;min-height:0;overflow:auto;margin-top:3px;white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.75;cursor:pointer}
-.dc-speech .dc-caret{display:inline-block;width:6px;height:12px;background:#2a2433;vertical-align:-2px;animation:dc-blink .8s steps(1) infinite}
+.dc-speech .dc-caret{display:inline-block;width:6px;height:12px;background:var(--dc-ink);vertical-align:-2px;animation:dc-blink .8s steps(1) infinite}
 @keyframes dc-blink{50%{opacity:0}}
 .dc-bubble.dc-say{animation:dc-pop .18s steps(2)}
 @keyframes dc-pop{from{transform:translateY(2px)}to{transform:translateY(0)}}
 .dc-typing{display:inline-flex;gap:3px;padding:2px 0}
-.dc-typing i{width:5px;height:5px;background:#8a4b2a;display:block;animation:dc-dot 1s steps(2) infinite}
+.dc-typing i{width:5px;height:5px;background:var(--dc-ink-accent);display:block;animation:dc-dot 1s steps(2) infinite}
 .dc-typing i:nth-child(2){animation-delay:.2s}.dc-typing i:nth-child(3){animation-delay:.4s}
 @keyframes dc-dot{50%{opacity:.2}}
 
-.dc-board-wrap{padding:8px 8px 0;flex:0 0 auto;display:flex;justify-content:center}
-.dc-board{width:100%;max-width:max(220px,calc(100cqh - 380px));aspect-ratio:1/1;display:grid;grid-template-columns:repeat(8,1fr);grid-template-rows:repeat(8,1fr);background:#0a101c;border:2px solid #0a101c;box-shadow:4px 4px 0 #070b14;position:relative}
+.dc-board-wrap{padding:8px 8px 0;flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;container-type:size;overflow:hidden}
+.dc-board{width:100%;width:min(100%,100cqh);max-width:100%;aspect-ratio:1/1;display:grid;grid-template-columns:repeat(8,1fr);grid-template-rows:repeat(8,1fr);background:var(--dc-board-frame);border:2px solid var(--dc-board-frame);box-shadow:4px 4px 0 var(--dc-shadow);position:relative;flex:0 0 auto}
 .dc-sq{position:relative;display:grid;place-items:center;padding:0;border:0;cursor:pointer;min-width:0;min-height:0}
-.dc-sq.light{background:#e8d8b8}
-.dc-sq.dark{background:#5a7fa6}
-.dc-sq.sel{box-shadow:inset 0 0 0 3px #f0b429}
+.dc-sq.light{background:var(--dc-light-sq)}
+.dc-sq.dark{background:var(--dc-dark-sq)}
+.dc-sq.sel{box-shadow:inset 0 0 0 3px var(--dc-gold)}
 .dc-sq.last{box-shadow:inset 0 0 0 3px rgba(255,196,64,.8)}
-.dc-sq.check{box-shadow:inset 0 0 0 3px #d94f5c}
-.dc-sq .dc-dot{width:22%;height:22%;background:#1d2a44;opacity:.55;border-radius:50%;position:absolute;pointer-events:none}
-.dc-sq .dc-ring{position:absolute;inset:8%;border:3px solid #d94f5c;border-radius:50%;pointer-events:none}
+.dc-sq.check{box-shadow:inset 0 0 0 3px var(--dc-danger)}
+.dc-sq .dc-dot{width:22%;height:22%;background:var(--dc-ink);opacity:.45;border-radius:50%;position:absolute;pointer-events:none}
+.dc-sq .dc-ring{position:absolute;inset:8%;border:3px solid var(--dc-danger);border-radius:50%;pointer-events:none}
 .dc-sq.dc-target{cursor:pointer}
 .dc-piece{width:92%;height:92%;object-fit:contain;pointer-events:none;filter:drop-shadow(0 1px 0 rgba(0,0,0,.35))}
 .dc-board-shake{animation:dc-shake .28s steps(2)}
-.dc-sq:focus-visible{outline:2px solid #f0b429;outline-offset:-2px}
+.dc-sq:focus-visible{outline:2px solid var(--dc-gold);outline-offset:-2px}
 
-.dc-status{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 10px 4px;color:#9fb6d8;font-size:12px;flex:0 0 auto}
-.dc-status b{color:#f4e8cc;font-weight:400}
+.dc-status{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 10px 4px;color:var(--dc-text-dim);font-size:12px;flex:0 0 auto}
+.dc-status b{color:var(--dc-title);font-weight:400}
 .dc-status .dc-turn{display:flex;align-items:center;gap:6px;min-width:0;white-space:nowrap;overflow:hidden}
-.dc-turn-dot{width:8px;height:8px;background:#f0b429;display:inline-block}
-.dc-check-tag{color:#ff8a94}
-.dc-captured{display:flex;align-items:center;gap:3px;color:#7f96b8;font-size:12px;min-height:14px}
+.dc-turn-dot{width:8px;height:8px;background:var(--dc-gold);display:inline-block}
+.dc-check-tag{color:var(--dc-danger)}
+.dc-captured{display:flex;align-items:center;gap:3px;color:var(--dc-text-muted);font-size:12px;min-height:14px}
 .dc-captured img{width:14px;height:14px;opacity:.9}
 
 .dc-actions{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:2px 8px 8px;flex:0 0 auto}
-.dc-btn{background:#1b2740;color:#dfe9ff;border:2px solid #3b5a8c;box-shadow:2px 2px 0 #070b14;cursor:pointer;padding:6px 2px;line-height:1.2;white-space:nowrap}
-.dc-btn:hover{background:#24365a}
-.dc-btn:active{transform:translate(1px,1px);box-shadow:1px 1px 0 #070b14}
-.dc-btn.gold{background:#f0b429;color:#2a1c08;border-color:#8a5a12}
-.dc-btn.red{background:#d94f5c;color:#fff;border-color:#7a2630}
+.dc-btn{background:var(--dc-bg-panel);color:var(--dc-text);border:2px solid var(--dc-border);box-shadow:2px 2px 0 var(--dc-shadow);cursor:pointer;padding:6px 2px;line-height:1.2;white-space:nowrap}
+.dc-btn:hover{background:var(--dc-bg-hover)}
+.dc-btn:active{transform:translate(1px,1px);box-shadow:1px 1px 0 var(--dc-shadow)}
+.dc-btn.gold{background:var(--dc-gold);color:var(--dc-gold-ink);border-color:var(--dc-gold-border)}
+.dc-btn.red{background:var(--dc-danger);color:#fff;border-color:#7a2630}
 .dc-btn:disabled{opacity:.4;cursor:default}
 
-.dc-moves{margin:0 auto 8px;width:calc(100% - 16px);background:#efe2c4;color:#3a2f22;border:2px solid #2a2433;padding:5px 8px;display:flex;align-items:center;gap:6px;flex:0 0 auto;min-height:30px;overflow:hidden}
-.dc-moves-label{color:#8a4b2a;flex:0 0 auto}
+.dc-moves{margin:0 auto 8px;width:calc(100% - 16px);background:var(--dc-paper-2);color:var(--dc-ink);border:2px solid var(--dc-ink);padding:5px 8px;display:flex;align-items:center;gap:6px;flex:0 0 auto;min-height:30px;overflow:hidden}
+.dc-moves-label{color:var(--dc-ink-accent);flex:0 0 auto}
 .dc-moves-text{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px}
-.dc-moves-more{background:none;border:0;color:#8a4b2a;cursor:pointer;padding:0 2px;font-size:12px}
-.dc-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:auto;padding:6px 10px;border-top:1px solid #24344f;color:#6f86a8;font-size:12px;flex:0 0 auto;white-space:nowrap;overflow:hidden}
+.dc-moves-now{display:none;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px}
+.dc-moves-more{background:none;border:0;color:var(--dc-ink-accent);cursor:pointer;padding:0 2px;font-size:12px}
+.dc-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:auto;padding:6px 10px;border-top:1px solid var(--dc-border-soft);color:var(--dc-text-muted);font-size:12px;flex:0 0 auto;white-space:nowrap;overflow:hidden}
 
 .dc-overlay{position:absolute;inset:0;z-index:30;background:rgba(6,10,18,.9);display:flex;flex-direction:column;animation:dc-fade .12s steps(2)}
 @keyframes dc-fade{from{opacity:0}to{opacity:1}}
-.dc-sheet-head{display:flex;align-items:center;padding:10px;border-bottom:2px solid #2c3f63;background:#0d1422}
-.dc-sheet-title{font-size:24px;line-height:1;color:#f4e8cc}
+.dc-sheet-head{display:flex;align-items:center;padding:10px;border-bottom:2px solid var(--dc-border-soft);background:var(--dc-bg-deep)}
+.dc-sheet-title{font-size:24px;line-height:1;color:var(--dc-title)}
 .dc-sheet-body{flex:1;min-height:0;overflow:auto;padding:8px 12px 18px}
-.dc-row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 0;border-bottom:1px dashed #2c3f63}
-.dc-row-label{color:#a9c6ee;flex:0 0 auto}
+.dc-row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 0;border-bottom:1px dashed var(--dc-border-soft)}
+.dc-row-label{color:var(--dc-text-dim);flex:0 0 auto}
 .dc-seg{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
-.dc-seg button{background:#1b2740;color:#cfe0f8;border:2px solid #3b5a8c;padding:4px 7px;cursor:pointer}
-.dc-seg button.on{background:#f0b429;color:#2a1c08;border-color:#8a5a12}
-.dc-hint{color:#6f86a8;font-size:12px;padding:6px 0}
-.dc-stats{background:#0b1220;border:2px solid #24344f;padding:8px;margin-top:6px;color:#cfe0f8}
-.dc-overlay-actions{display:flex;gap:6px;padding:8px;border-top:2px solid #2c3f63;background:#0d1422}
+.dc-seg button{background:var(--dc-bg-panel);color:var(--dc-text);border:2px solid var(--dc-border);padding:4px 7px;cursor:pointer}
+.dc-seg button.on{background:var(--dc-gold);color:var(--dc-gold-ink);border-color:var(--dc-gold-border)}
+.dc-hint{color:var(--dc-text-muted);font-size:12px;padding:6px 0}
+.dc-stats{background:var(--dc-bg-track);border:2px solid var(--dc-border-soft);padding:8px;margin-top:6px;color:var(--dc-text)}
+.dc-overlay-actions{display:flex;gap:6px;padding:8px;border-top:2px solid var(--dc-border-soft);background:var(--dc-bg-deep)}
 .dc-overlay-actions .dc-btn{flex:1}
 .dc-draw-wrap{min-height:100%;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box}
-.dc-draw-card{display:flex;gap:12px;align-items:center;background:#141f34;border:2px solid #3b5a8c;box-shadow:4px 4px 0 #070b14;padding:12px;max-width:320px}
-.dc-draw-mark{width:48px;height:48px;flex:0 0 48px;display:grid;place-items:center;background:#f3e6c8;color:#2a2433;border:2px solid #2a2433;font-size:24px;line-height:1}
-.dc-draw-title{color:#f2e7cf;line-height:1.5}
-.dc-draw-desc{color:#9fb6d8;line-height:1.55;margin-top:4px}
+.dc-draw-card{display:flex;gap:12px;align-items:center;background:var(--dc-bg-panel);border:2px solid var(--dc-border);box-shadow:4px 4px 0 var(--dc-shadow);padding:12px;max-width:320px}
+.dc-draw-mark{width:48px;height:48px;flex:0 0 48px;display:grid;place-items:center;background:var(--dc-paper);color:var(--dc-ink);border:2px solid var(--dc-ink);font-size:24px;line-height:1}
+.dc-draw-title{color:var(--dc-title);line-height:1.5}
+.dc-draw-desc{color:var(--dc-text-dim);line-height:1.55;margin-top:4px}
 
 .dc-promo{position:absolute;inset:0;z-index:40;background:rgba(6,10,18,.82);display:grid;place-items:center;padding:12px}
-.dc-promo-card{background:#f3e6c8;color:#2a2433;border:2px solid #2a2433;box-shadow:4px 4px 0 #070b14;padding:10px;width:100%;max-width:260px}
-.dc-promo-title{text-align:center;color:#8a4b2a;margin-bottom:8px}
+.dc-promo-card{background:var(--dc-paper);color:var(--dc-ink);border:2px solid var(--dc-ink);box-shadow:4px 4px 0 var(--dc-shadow);padding:10px;width:100%;max-width:260px}
+.dc-promo-title{text-align:center;color:var(--dc-ink-accent);margin-bottom:8px}
 .dc-promo-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
-.dc-promo-grid button{background:#e8d8b8;border:2px solid #2a2433;padding:4px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;color:#2a2433}
+.dc-promo-grid button{background:var(--dc-light-sq);border:2px solid var(--dc-ink);padding:4px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;color:var(--dc-ink)}
 .dc-promo-grid img{width:44px;height:44px;object-fit:contain;image-rendering:pixelated}
 .dc-promo-grid span{font-size:12px}
 
 .dc-result{position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(6,10,18,.74);padding:16px;text-align:center}
-.dc-result-title{font-size:24px;color:#f4e8cc;text-shadow:2px 2px 0 #070b14}
-.dc-result-sub{color:#a9c6ee;max-width:240px}
+.dc-result-title{font-size:24px;color:var(--dc-title);text-shadow:2px 2px 0 var(--dc-shadow)}
+.dc-result-sub{color:var(--dc-text-dim);max-width:240px}
 .dc-result .dc-btn{padding:7px 18px}
 
-.dc-toast{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);background:#0b1220;border:2px solid #3b5a8c;color:#dfe9ff;padding:4px 10px;z-index:50;white-space:nowrap;animation:dc-fade .12s steps(2)}
+.dc-toast{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);background:var(--dc-bg-track);border:2px solid var(--dc-border);color:var(--dc-text);padding:4px 10px;z-index:50;white-space:nowrap;animation:dc-fade .12s steps(2)}
 .dc-shake{animation:dc-shake .28s steps(2)}
 @keyframes dc-shake{25%{transform:translateX(-2px)}50%{transform:translateX(2px)}75%{transform:translateX(-1px)}}
 
-.dc-log{position:absolute;inset:0;z-index:25;background:#0d1422;display:flex;flex-direction:column}
+.dc-log{position:absolute;inset:0;z-index:25;background:var(--dc-bg-deep);display:flex;flex-direction:column}
 .dc-log-list{flex:1;overflow:auto;padding:10px;display:flex;flex-direction:column;gap:6px}
-.dc-log-item{font-size:12px;line-height:1.7;padding:5px 8px;border:1px solid #24344f;background:#131d30;max-width:92%}
-.dc-log-item.me{align-self:flex-end;background:#1d2c48;border-color:#3b5a8c}
-.dc-log-item.sys{color:#7f96b8;border-color:transparent;background:none;align-self:center;padding:2px}
+.dc-log-item{font-size:12px;line-height:1.7;padding:5px 8px;border:1px solid var(--dc-border-soft);background:var(--dc-bg-log);max-width:92%}
+.dc-log-item.me{align-self:flex-end;background:var(--dc-bg-log-me);border-color:var(--dc-border)}
+.dc-log-item.sys{color:var(--dc-text-muted);border-color:transparent;background:none;align-self:center;padding:2px}
 
 @container (max-width:340px){
   .dc-portrait-stage{height:100px}
@@ -2545,7 +2023,9 @@ function attachDeepChessStyles() {
   .dc-moves{margin:0 6px 6px}
 }
 @container (max-height:620px){
-  .dc-moves{display:none}
+  .dc-moves{min-height:24px;padding:3px 6px;margin:0 auto 6px}
+  .dc-moves-label,.dc-moves-text{display:none}
+  .dc-moves-now{display:block}
   .dc-portrait{height:84px}
   .dc-scene{padding:6px}
   .dc-board-wrap{padding-top:6px}
@@ -2569,14 +2049,15 @@ function attachDeepChessStyles() {
  * pixel UI. The Host half is intentionally empty.
  */
 
+
 const PIECE_KEY = ['', 'p', 'n', 'b', 'r', 'q', 'k'];
-const QUEEN_TYPE = 5;
+const BUILD_VERSION = '0.5.0';
 const SAVE_KEY = 'deepchess.save.v1';
 const SETTINGS_KEY = 'deepchess.settings.v2';
 const STATS_KEY = 'deepchess.stats.v1';
 const KEY_EVENTS = new Set([
   'start', 'win', 'lose', 'draw', 'resign', 'undo', 'playerBlunder', 'herBlunder',
-  'queenCapture', 'promotion', 'playerCheck', 'herCheck',
+  'queenCapture', 'herQueenCapture', 'promotion', 'playerCheck', 'herCheck',
 ]);
 
 const DEFAULT_SETTINGS = {
@@ -2629,54 +2110,46 @@ function pieceSide(piece) {
   return colorOf(piece) === 0 ? 'w' : 'b';
 }
 
-function moveCtx(game, move, san) {
-  return {
-    move: san || '',
-    pieceKey: PIECE_KEY[typeOf(move.piece)] || 'p',
-    capturedKey: move.captured ? PIECE_KEY[typeOf(move.captured)] : '',
-    n: Math.floor(game.history.length / 2) + 1,
-  };
-}
-
-function classifyMove(game, move, san, delta, byPlayer) {
-  if (move.promotion) return 'promotion';
-  if (move.flags & 4) return 'castle';
-  if (move.flags & 2) return 'enPassant';
-  if (san.includes('+') || san.includes('#')) return byPlayer ? 'playerCheck' : 'herCheck';
-  if (move.captured) {
-    if (typeOf(move.captured) === QUEEN_TYPE) return 'queenCapture';
-    return byPlayer ? 'playerCapture' : 'herCapture';
-  }
-  if (delta > 140) return byPlayer ? 'playerBlunder' : 'herBlunder';
-  if (delta < -140) return byPlayer ? 'playerGood' : 'herGood';
-  return byPlayer ? 'playerQuiet' : 'herQuiet';
-}
-
 function Typewriter({ text, onDone }) {
   const [shown, setShown] = React.useState(0);
+  const timerRef = React.useRef(null);
+  const doneRef = React.useRef(false);
+  const onDoneRef = React.useRef(onDone);
+  onDoneRef.current = onDone;
+  const chars = [...text];
+  function complete() {
+    clearTimeout(timerRef.current);
+    setShown(chars.length);
+    if (!doneRef.current) {
+      doneRef.current = true;
+      onDoneRef.current?.();
+    }
+  }
   React.useEffect(() => {
     setShown(0);
+    doneRef.current = false;
+    const letters = [...text];
     let index = 0;
-    let timer = null;
     const step = () => {
       index += 1;
       setShown(index);
-      if (index < text.length) {
-        const ch = text[index - 1];
-    const delay = /[，。！？…,.!?]/.test(ch) ? 130 : 22;
-        timer = setTimeout(step, delay);
-      } else if (onDone) {
-        onDone();
+      if (index < letters.length) {
+        const delay = /[，。！？…,.!?]/.test(letters[index - 1]) ? 130 : 22;
+        timerRef.current = setTimeout(step, delay);
+      } else if (!doneRef.current) {
+        doneRef.current = true;
+        onDoneRef.current?.();
       }
     };
-    timer = setTimeout(step, 60);
-    return () => clearTimeout(timer);
+    if (letters.length) timerRef.current = setTimeout(step, 60);
+    else complete();
+    return () => clearTimeout(timerRef.current);
   }, [text]);
-  const done = shown >= text.length;
+  const done = shown >= chars.length;
   return React.createElement(
     'div',
-    { className: 'dc-speech', onClick: () => setShown(text.length) },
-    text.slice(0, shown),
+    { className: 'dc-speech', onClick: complete },
+    chars.slice(0, shown).join(''),
     !done ? React.createElement('span', { className: 'dc-caret' }) : null,
   );
 }
@@ -2693,7 +2166,7 @@ function PixelGlyph({ name }) {
       teeth.map((box, index) => React.createElement('rect', {
         key: index, x: box[0], y: box[1], width: box[2], height: box[3], fill: 'currentColor',
       })),
-      React.createElement('rect', { x: 7, y: 7, width: 2, height: 2, fill: '#121a2a' }));
+      React.createElement('rect', { x: 7, y: 7, width: 2, height: 2, fill: 'var(--dc-bg)' }));
   }
   if (name === 'chat') {
     return React.createElement('svg', common,
@@ -2711,11 +2184,44 @@ function ChessWhaleGlyph(props) {
   },
   React.createElement('path', { d: 'M5 7h8v3h3v3h-3v4H5v-4H2v-3h3V7z', fill: 'currentColor' }),
   React.createElement('path', { d: 'M16 5l4-2v4l4 2-4 2V9l-4 2V5z', fill: 'currentColor' }),
-  React.createElement('rect', { x: 7, y: 9, width: 2, height: 2, fill: '#121a2a' }),
+  React.createElement('rect', { x: 7, y: 9, width: 2, height: 2, fill: 'var(--dc-bg)' }),
   React.createElement('rect', { x: 5, y: 18, width: 10, height: 2, fill: 'currentColor' }));
 }
 
 function Board({ game, selected, onSquare, settings, hints, disabled, playerColor, checkSquare, lastMove, boardRef, anim, boardShake }) {
+  const initialFocus = selected != null
+    ? selected
+    : lastMove?.to ?? game.position.kings[colorIndex(playerColor)] ?? 0;
+  const [focusSq, setFocusSq] = React.useState(initialFocus);
+  const squareRefs = React.useRef({});
+  const rankStep = settings.flip ? -1 : 1;
+  const fileStep = settings.flip ? 1 : -1;
+  function focusSquare(sq) {
+    setFocusSq(sq);
+    // Focusing immediately also works for a square whose tabIndex is still -1;
+    // the state update promotes it to the single roving tab stop.
+    squareRefs.current[sq]?.focus();
+  }
+  function onSquareKey(event, sq) {
+    let next = null;
+    const rank = sq >> 4;
+    const file = sq & 15;
+    if (event.key === 'ArrowUp') next = (rank + rankStep) * 16 + file;
+    else if (event.key === 'ArrowDown') next = (rank - rankStep) * 16 + file;
+    else if (event.key === 'ArrowLeft') next = rank * 16 + file + fileStep;
+    else if (event.key === 'ArrowRight') next = rank * 16 + file - fileStep;
+    if (next != null) {
+      event.preventDefault();
+      const nextRank = next >> 4;
+      const nextFile = next & 15;
+      if (nextRank >= 0 && nextRank < 8 && nextFile >= 0 && nextFile < 8) focusSquare(next);
+      return;
+    }
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      if (!disabled) onSquare(sq);
+    }
+  }
   const cells = [];
   const ranks = settings.flip ? [0, 1, 2, 3, 4, 5, 6, 7] : [7, 6, 5, 4, 3, 2, 1, 0];
   const files = settings.flip ? [7, 6, 5, 4, 3, 2, 1, 0] : [0, 1, 2, 3, 4, 5, 6, 7];
@@ -2743,9 +2249,12 @@ function Board({ game, selected, onSquare, settings, hints, disabled, playerColo
         type: 'button',
         className: classes.join(' '),
         'aria-label': squareName(sq),
-        onClick: () => onSquare(sq),
-        disabled,
-        tabIndex: 0,
+        'aria-disabled': disabled ? 'true' : undefined,
+        onClick: () => { if (!disabled) onSquare(sq); },
+        onFocus: () => setFocusSq(sq),
+        onKeyDown: (event) => onSquareKey(event, sq),
+        ref: (element) => { squareRefs.current[sq] = element; },
+        tabIndex: focusSq === sq ? 0 : -1,
       },
       piece
         ? React.createElement('img', {
@@ -2792,7 +2301,7 @@ function DeepChessPanel(props) {
     bootRef.current = {
       game,
       save,
-      color: save?.playerColor === 'black' ? 'black' : 'white',
+      color: (save?.playerColor || loadSettings().playerColor) === 'black' ? 'black' : 'white',
     };
   }
   const game = bootRef.current.game;
@@ -2812,7 +2321,6 @@ function DeepChessPanel(props) {
   const [menu, setMenu] = React.useState(null);
   const [confirm, setConfirm] = React.useState(null);
   const [toast, setToast] = React.useState('');
-  const [undoCount, setUndoCount] = React.useState(0);
   const [log, setLog] = React.useState([]);
   const [shaking, setShaking] = React.useState(false);
   const [anim, setAnim] = React.useState(null);
@@ -2830,13 +2338,18 @@ function DeepChessPanel(props) {
   const toastTimer = React.useRef(null);
   const shakeTimer = React.useRef(null);
   const audioRef = React.useRef(null);
-  const factsRef = React.useRef({ blunders: 0, undos: 0 });
-  const specialRef = React.useRef(new Set());
+  const factsRef = React.useRef({ blunders: 0, blunderStreak: 0, undos: 0, ...boot.save?.facts });
+  const specialRef = React.useRef(new Set(Array.isArray(boot.save?.specials) ? boot.save.specials : []));
   const turnStartRef = React.useRef(Date.now());
   const slowSaidRef = React.useRef(false);
   const moodHistoryRef = React.useRef([]);
   const lastActivityRef = React.useRef(Date.now());
   const idleSaidRef = React.useRef(false);
+  const speechDirectorRef = React.useRef(null);
+  const openingSaidRef = React.useRef('');
+  const lowSaidRef = React.useRef(false);
+  const longSaidRef = React.useRef(false);
+  if (!speechDirectorRef.current) speechDirectorRef.current = new SpeechDirector(showSpeech);
 
   const playerColor = gameColor;
   const herColor = playerColor === 'white' ? 'black' : 'white';
@@ -2848,7 +2361,16 @@ function DeepChessPanel(props) {
 
   React.useEffect(() => {
     banterRef.current.setLocale(locale);
+    speechDirectorRef.current.reset();
   }, [locale]);
+
+  React.useEffect(() => () => {
+    speechDirectorRef.current.reset();
+    clearTimeout(drawTimer.current);
+    clearTimeout(toastTimer.current);
+    clearTimeout(shakeTimer.current);
+    clearTimeout(animTimer.current);
+  }, []);
 
   function showToast(text) {
     setToast(text);
@@ -2856,88 +2378,58 @@ function DeepChessPanel(props) {
     toastTimer.current = setTimeout(() => setToast(''), 1600);
   }
 
-  function saySpecial(key, ctx, mood) {
-    if (specialRef.current.has(key)) return false;
-    specialRef.current.add(key);
-    say(key, ctx, mood, true);
+  function maybeOpening(ctx, event) {
+    if (event !== 'playerQuiet' && event !== 'herQuiet') return false;
+    if (game.history.length < 4 || game.history.length > 14) return false;
+    const opening = detectOpening(game.history);
+    if (!opening || opening.generic || openingSaidRef.current === opening.key) return false;
+    openingSaidRef.current = opening.key;
+    say('opening', {
+      ...ctx,
+      openingKey: opening.key,
+      opening: locale === 'en' ? opening.en : opening.zh,
+    }, 'thinking', true);
     return true;
   }
 
-  function specialFor(move, san, before, after) {
-    const sign = playerColor === 'white' ? 1 : -1;
-    const beforeP = before * sign;
-    const afterP = after * sign;
-    let captures = 0;
-    let checks = 0;
-    for (const entry of game.history) {
-      if (entry.move.captured) captures += 1;
-      if (/[+#]/.test(entry.san)) checks += 1;
-    }
-    let queens = 0;
+  function maybeStateComment() {
+    if (over) return;
     let pieces = 0;
     for (let sq = 0; sq < 128; sq += 1) {
-      if ((sq & 0x88) !== 0) continue;
-      const piece = game.position.at(sq);
-      if (!piece) continue;
-      const type = typeOf(piece);
-      if (type === QUEEN_TYPE) queens += 1;
-      if (type !== 6) pieces += 1;
+      if ((sq & 0x88) !== 0 || !game.position.at(sq)) continue;
+      if (typeOf(game.position.at(sq)) !== 6) pieces += 1;
     }
-    const used = specialRef.current;
-    if (move.promotion && typeOf(move.promotion) !== QUEEN_TYPE && !used.has('underpromotion')) {
-      return { key: 'underpromotion', mood: 'surprised' };
+    if (!lowSaidRef.current && pieces <= 6) {
+      lowSaidRef.current = true;
+      say('lowMaterial', {}, 'determined', true);
+    } else if (!longSaidRef.current && game.history.length >= 40) {
+      longSaidRef.current = true;
+      say('longGame', {}, 'tired', true);
     }
-    if (captures === 1 && move.captured && !used.has('firstCapture')) {
-      return { key: 'firstCapture', mood: 'surprised' };
-    }
-    if (checks === 1 && /[+#]/.test(san) && !used.has('firstCheck')) {
-      return { key: 'firstCheck', mood: 'panic' };
-    }
-    if (queens === 0 && !used.has('queenTrade')) return { key: 'queenTrade', mood: 'surprised' };
-    if (((beforeP < -250 && afterP > 250) || (beforeP > 250 && afterP < -250)) && !used.has('comeback')) {
-      return { key: 'comeback', mood: 'panic' };
-    }
-    if (factsRef.current.blunders === 3 && !used.has('blunderStreak')) {
-      return { key: 'blunderStreak', mood: 'laugh' };
-    }
-    if (game.history.length >= 60 && !used.has('longGameSpecial')) {
-      return { key: 'longGameSpecial', mood: 'tired' };
-    }
-    if (pieces <= 6 && !used.has('lowMaterialSpecial')) {
-      return { key: 'lowMaterialSpecial', mood: 'determined' };
-    }
-    return null;
+  }
+
+  function saySpecial(key, ctx, mood) {
+    if (specialRef.current.has(key)) return false;
+    const accepted = say(key, ctx, mood, true);
+    if (accepted) specialRef.current.add(key);
+    return accepted;
   }
 
   function poke() {
-    if (pendingPromo || menu) return;
+    if (pendingPromo || menu || drawPending) return;
     let nextMood = mood;
-    if (!['angry', 'annoyed'].includes(mood) && Math.random() < 0.16) nextMood = 'love';
-    else if (mood === 'calm' || mood === 'smile') nextMood = 'pout';
-    else if (mood === 'thinking') nextMood = 'annoyed';
-    rememberMood(nextMood);
-    const line = banterRef.current.pick('poke', {}, nextMood);
-    setSpeech(line);
-    setSpeechKey((key) => key + 1);
-    pushLog('her', line);
-    if (nextMood === 'annoyed' || nextMood === 'angry' || nextMood === 'panic') triggerShake();
+    if (game.inCheck() && game.turn !== playerTurn && !over) nextMood = 'panic';
+    else if (thinking) nextMood = 'annoyed';
+    else if (!over) nextMood = ['love', 'embarrassed', 'pout', 'laugh'][Math.floor(Math.random() * 4)];
+    say('poke', {}, nextMood, true);
+    lastActivityRef.current = Date.now();
+    idleSaidRef.current = false;
   }
 
   function changeDifficulty(id) {
     if (id === settings.difficulty) return;
     setSettings((value) => ({ ...value, difficulty: id }));
-    const lines = {
-      easy: '行，我摸鱼。',
-      normal: '好，我放点水。',
-      hard: '行，我认真了。',
-      whale: '鲸鱼模式。你确定？',
-      master: '深渊模式……输了别哭。',
-    };
-    const line = lines[id];
-    rememberMood(id === 'master' || id === 'whale' ? 'determined' : 'smug');
-    setSpeech(line);
-    setSpeechKey((key) => key + 1);
-    pushLog('her', line);
+    if (!over) say('difficulty', { difficulty: id }, id === 'master' || id === 'whale' ? 'determined' : 'smile', true);
     showToast(`${t('set.difficulty')} · ${t(`diff.${id}`)}`);
   }
 
@@ -2991,6 +2483,8 @@ function DeepChessPanel(props) {
       ucis: game.history.map((entry) => entry.uci),
       manual: nextManual,
       playerColor: nextColor,
+      facts: factsRef.current,
+      specials: [...specialRef.current],
       savedAt: Date.now(),
     });
   }
@@ -3032,9 +2526,21 @@ function DeepChessPanel(props) {
     setLog((items) => [...items.slice(-79), { who, text }]);
   }
 
-  function say(event, ctx, nextMood, force = false) {
+  function showSpeech(line) {
+    banterRef.current.remember(line.text, line.event);
+    rememberMood(line.mood);
+    setSpeech(line.text);
+    setSpeechKey((key) => key + 1);
+    pushLog('her', line.text);
+    if (line.mood === 'angry' || line.mood === 'panic') triggerShake();
+  }
+
+  function say(event, ctx = {}, nextMood, force = false) {
+    const ambient = ['idle', 'playerThinkLong', 'herThink'].includes(event);
+    const probability = settings.banter === 'quiet' ? 0.08 : settings.banter === 'chatty' ? 0.9 : event === 'playerQuiet' ? 0.55 : 0.72;
+    if (!force && !KEY_EVENTS.has(event) && Math.random() > probability) return false;
     const flavour = nextMood || chooseMood({
-      status: outcome,
+      status: manual || game.status(),
       evalWhite: evaluateWhite(game.position),
       event,
       playerColor,
@@ -3043,31 +2549,19 @@ function DeepChessPanel(props) {
       moveCount: game.history.length,
       recentMoods: moodHistoryRef.current,
     });
-    rememberMood(flavour);
-    const probability = settings.banter === 'quiet' ? 0.1 : settings.banter === 'chatty' ? 0.92 : 0.52;
-    if (!force && !KEY_EVENTS.has(event) && Math.random() > probability) return;
-    let text = banterRef.current.pick(event, ctx, flavour);
-    if (event === 'start') {
-      if (settings.difficulty === 'master') {
-        text = '深渊模式。输了别哭。';
-        rememberMood('determined');
-      } else if (settings.difficulty === 'whale') {
-        text = '鲸鱼模式。你确定？';
-        rememberMood('determined');
-      }
-    }
-    if (event === 'playerBlunder' && factsRef.current.blunders >= 2 && Math.random() < 0.18) {
-      text = banterRef.current.pick('callback', ctx, flavour);
-    }
-    setSpeech(text);
-    setSpeechKey((key) => key + 1);
-    pushLog('her', text);
-    if (flavour === 'angry' || flavour === 'panic' || flavour === 'annoyed') triggerShake();
+    const picked = banterRef.current.pickDetailed(event, ctx, flavour, false);
+    const lineMood = nextMood || picked.mood || flavour;
+    return speechDirectorRef.current.speak({
+      event, text: picked.text, mood: lineMood,
+      priority: ambient ? 0 : ['win', 'lose', 'draw', 'resign', 'checkmateWin', 'checkmateLose', 'threefold', 'fiftyMove'].includes(event) ? 3 : force || KEY_EVENTS.has(event) ? 2 : 1,
+    });
   }
 
   function finish(status, source) {
     if (settledRef.current) return;
     settledRef.current = true;
+    clearTimeout(drawTimer.current);
+    setDrawPending(false);
     const draw = !status.winner;
     const playerWon = status.winner === playerColor;
     setManual(status);
@@ -3086,91 +2580,47 @@ function DeepChessPanel(props) {
     writeJSON(STATS_KEY, next);
     setThinking(false);
     aiRef.current = false;
-    if (source === 'resign') {
-      const line = banterRef.current.pick('resign', {}, 'smug');
-      rememberMood('smug');
-      setSpeech(line);
-      pushLog('her', line);
-      playSound('win');
-      return;
-    }
-    if (source === 'agreement') {
-      const line = banterRef.current.pick('draw', {}, 'calm');
-      rememberMood('calm');
-      setSpeech(line);
-      pushLog('her', line);
-      return;
-    }
-    let specialKey = null;
-    let specialMood = 'calm';
-    if (status.state === 'checkmate') {
-      specialKey = playerWon ? 'checkmateLose' : 'checkmateWin';
-      specialMood = playerWon ? 'cry' : 'smug';
-    } else if (status.reason === 'repetition') {
-      specialKey = 'threefold';
-    } else if (status.reason === 'fifty-move') {
-      specialKey = 'fiftyMove';
-    }
-    if (specialKey && !specialRef.current.has(specialKey)) {
-      specialRef.current.add(specialKey);
-      const line = banterRef.current.pick(specialKey, {}, specialMood);
-      rememberMood(specialMood);
-      setSpeech(line);
-      pushLog('her', line);
-      playSound(playerWon ? 'lose' : 'win');
-      return;
-    }
-    if (draw) {
-      const line = banterRef.current.pick('draw', {}, 'calm');
-      rememberMood('calm');
-      setSpeech(line);
-      pushLog('her', line);
-      playSound('move');
-    } else if (playerWon) {
-      const line = banterRef.current.pick('lose', {}, stats.streak > 2 ? 'cry' : 'sad');
-      rememberMood(stats.streak > 2 ? 'cry' : 'sad');
-      setSpeech(line);
-      pushLog('her', line);
-      playSound('lose');
-    } else {
-      const winMood = Math.random() < 0.3 ? 'love' : Math.random() < 0.5 ? 'wink' : 'smug';
-      const line = banterRef.current.pick('win', {}, winMood);
-      rememberMood(winMood);
-      setSpeech(line);
-      pushLog('her', line);
-      playSound('win');
-    }
+    const event = source === 'resign' ? 'resign'
+      : status.state === 'checkmate' ? playerWon ? 'checkmateLose' : 'checkmateWin'
+        : status.reason === 'repetition' ? 'threefold'
+          : status.reason === 'fifty-move' ? 'fiftyMove'
+            : draw ? 'draw' : playerWon ? 'lose' : 'win';
+    const finalMood = chooseMood({ status, playerColor, recentMoods: moodHistoryRef.current });
+    say(event, {}, source === 'resign' ? 'smile' : finalMood, true);
+    playSound(draw ? 'move' : playerWon ? 'lose' : 'win');
   }
 
   function afterPlayerMove(move, result, before) {
     const after = evaluateWhite(game.position);
-    const delta = (before - after) * (playerColor === 'white' ? 1 : -1);
-    const event = classifyMove(game, move, result.san, delta, true);
-    const ctx = moveCtx(game, move, result.san);
+    const loss = result.status.state === 'playing' ? estimateMoveLoss(game.lastMove.before, move) : 0;
+    const gain = (after - before) * (playerColor === 'white' ? 1 : -1);
+    const event = classifyDialogueMove(move, result.san, loss, true, gain);
+    const verdict = describeQuality(loss, gain, locale);
+    const ctx = moveContext(move, result.san, game.history.length, { byPlayer: true, loss, gain, verdict });
+    speechDirectorRef.current.beginTurn();
     lastActivityRef.current = Date.now();
     idleSaidRef.current = false;
     animateMove(move, Boolean(move.captured), /[+#]/.test(result.san));
     bump();
-    persist();
     playSound(move.captured ? 'capture' : 'move');
     if (result.status.state !== 'playing') {
       finish(result.status, 'engine');
       return;
     }
     setSelected(null);
-    if (event === 'playerBlunder') factsRef.current.blunders += 1;
-    const special = specialFor(move, result.san, before, after);
-    if (!special || !saySpecial(special.key, { ...ctx, blunders: factsRef.current.blunders, undos: factsRef.current.undos }, special.mood)) {
-      say(event, { ...ctx, blunders: factsRef.current.blunders, undos: factsRef.current.undos });
+    if (loss >= 180) factsRef.current.blunders += 1;
+    factsRef.current.blunderStreak = loss >= 180 ? factsRef.current.blunderStreak + 1 : 0;
+    const special = event === 'playerBlunder' ? null : selectSpecial(game, move, result.san, before, after, playerColor, factsRef.current, specialRef.current);
+    if (!special || !saySpecial(special, { ...ctx, blunders: factsRef.current.blunders, undos: factsRef.current.undos })) {
+      const fullCtx = { ...ctx, blunders: factsRef.current.blunders, undos: factsRef.current.undos };
+      if (!maybeOpening(fullCtx, event)) say(event, fullCtx);
     }
-    if (event === 'playerBlunder') {
-      rememberMood('laugh');
-      triggerShake();
-    }
+    maybeStateComment();
+    persist();
   }
 
   function playMove(from, to, promotion = 0) {
-    if (over || thinking) return;
+    if (over || thinking || drawPending || game.turn !== playerTurn) return;
     const before = evaluateWhite(game.position);
     const result = game.playUci(from, to, promotion);
     if (!result) return;
@@ -3178,7 +2628,7 @@ function DeepChessPanel(props) {
   }
 
   function onSquare(sq) {
-    if (over || thinking) return;
+    if (over || thinking || drawPending || game.turn !== playerTurn) return;
     const piece = game.position.at(sq);
     const own = piece !== 0 && colorOf(piece) === playerTurn;
     if (selected == null) {
@@ -3209,7 +2659,7 @@ function DeepChessPanel(props) {
   }
 
   function undo() {
-    if (thinking || over) return;
+    if (thinking || over || drawPending) return;
     if (!game.history.length) {
       showToast(t('toast.noUndo'));
       return;
@@ -3217,45 +2667,43 @@ function DeepChessPanel(props) {
     game.undo();
     if (game.history.length && game.turn !== playerTurn) game.undo();
     setSelected(null);
-    setUndoCount((n) => n + 1);
     factsRef.current.undos += 1;
+    factsRef.current.blunderStreak = 0;
+    speechDirectorRef.current.reset();
     lastActivityRef.current = Date.now();
     idleSaidRef.current = false;
     bump();
     persist();
     playSound('move');
-    say('undo', { undos: factsRef.current.undos, n: Math.floor(game.history.length / 2) + 1 }, 'annoyed', true);
+    say('undo', { undos: factsRef.current.undos, n: Math.ceil(game.history.length / 2) || 1 }, undefined, true);
   }
 
   function startNew() {
+    const rematch = over;
     if (drawTimer.current) clearTimeout(drawTimer.current);
     setDrawPending(false);
     bootRef.current.game = new ChessGame();
     aiRef.current = false;
     settledRef.current = false;
-    factsRef.current = { blunders: 0, undos: 0 };
+    factsRef.current = { blunders: 0, blunderStreak: 0, undos: 0 };
     specialRef.current = new Set();
+    openingSaidRef.current = '';
+    lowSaidRef.current = false;
+    longSaidRef.current = false;
+    speechDirectorRef.current.reset();
     setManual(null);
     setGameColor(settings.playerColor);
     setSelected(null);
     setPendingPromo(null);
-    setUndoCount(0);
     setThinking(false);
     lastActivityRef.current = Date.now();
     idleSaidRef.current = false;
     moodHistoryRef.current = [];
-    rememberMood(settings.difficulty === 'master' || settings.difficulty === 'whale' ? 'determined' : 'smile');
-    setSpeech('');
     writeJSON(SAVE_KEY, { v: 1, ucis: [], manual: null, playerColor: settings.playerColor, savedAt: Date.now() });
     bump();
-    const startLine = settings.difficulty === 'master'
-      ? '深渊模式。输了别哭。'
-      : settings.difficulty === 'whale'
-        ? '鲸鱼模式。你确定？'
-        : banterRef.current.pick('start', {}, 'smile');
-    setSpeech(startLine);
-    setSpeechKey((key) => key + 1);
-    pushLog('her', '新的一局。');
+    const startEvent = rematch ? 'rematch' : 'start';
+    speechDirectorRef.current.speak({ event: startEvent, mood: 'smile', priority: 2,
+      text: banterRef.current.pick(startEvent, { playerColor: settings.playerColor }, 'smile', false) });
     showToast(t('toast.new'));
   }
 
@@ -3265,21 +2713,15 @@ function DeepChessPanel(props) {
   }
 
   function resolveDraw() {
-    if (game.status().state !== 'playing') {
+    if (settledRef.current || game.status().state !== 'playing') {
       setDrawPending(false);
       return;
     }
-    const perspective = (evaluateWhite(game.position)) * (playerColor === 'white' ? 1 : -1);
-    const accept = perspective < -280 ? Math.random() < 0.7 : Math.abs(perspective) < 80 ? Math.random() < 0.35 : false;
+    const accept = acceptsDraw(evaluateWhite(game.position), playerColor);
     if (accept) {
       finish({ state: 'draw', winner: null, reason: 'agreement' }, 'agreement');
     } else {
-      const mood = perspective > 120 ? 'smug' : 'pout';
-      rememberMood(mood);
-      const line = banterRef.current.pick('drawRefuse', {}, mood);
-      setSpeech(line);
-      setSpeechKey((key) => key + 1);
-      pushLog('her', line);
+      say('drawRefuse', {}, undefined, true);
       showToast(t('toast.drawRefused'));
     }
   }
@@ -3288,9 +2730,8 @@ function DeepChessPanel(props) {
     setConfirm(null);
     if (over || thinking || drawPending) return;
     setDrawPending(true);
-    rememberMood('thinking');
-    setSpeech(t('draw.thinking'));
-    setSpeechKey((key) => key + 1);
+    speechDirectorRef.current.reset();
+    say('drawOffer', {}, 'thinking', true);
     if (drawTimer.current) clearTimeout(drawTimer.current);
     drawTimer.current = setTimeout(() => {
       setDrawPending(false);
@@ -3301,22 +2742,18 @@ function DeepChessPanel(props) {
   React.useEffect(() => {
     if (startedRef.current) return;
     startedRef.current = true;
-    if (boot.save?.manual) {
+    if (over) {
       settledRef.current = true;
-      const won = boot.save.manual.winner === gameColor;
-      const event = !boot.save.manual.winner ? 'draw' : won ? 'lose' : 'win';
-      rememberMood(event === 'draw' ? 'calm' : won ? 'sad' : 'smug');
-      setSpeech(banterRef.current.pick(event, {}, event === 'win' ? 'smug' : 'calm'));
-      persist(boot.save.manual, gameColor);
+      const won = outcome.winner === gameColor;
+      const event = !outcome.winner ? 'draw' : won ? 'lose' : 'win';
+      say(event, {}, chooseMood({ status: outcome, playerColor: gameColor }), true);
+      persist(outcome, gameColor);
       return;
     }
     if (game.history.length) {
-      rememberMood('calm');
-      setSpeech('接着下？');
-      pushLog('her', '接着下？');
+      say('resume', {}, 'smile', true);
     } else {
-      setSpeech(banterRef.current.pick('start', {}, 'smile'));
-      rememberMood('smile');
+      say('start', { playerColor: gameColor }, 'smile', true);
     }
     persist(boot.save?.manual || null, gameColor);
   }, []);
@@ -3328,10 +2765,10 @@ function DeepChessPanel(props) {
     if (aiRef.current) return;
     aiRef.current = true;
     setThinking(true);
-    rememberMood('thinking');
     if (Math.random() < 0.24) say('herThink', {}, 'thinking');
     const timer = setTimeout(() => {
       if (!aiRef.current) return;
+      const searchStarted = performance.now();
       try {
         const before = evaluateWhite(game.position);
         const pick = chooseMove(game.position, settings.difficulty);
@@ -3343,12 +2780,10 @@ function DeepChessPanel(props) {
         const move = pick.move;
         const result = game.play(move);
         const after = evaluateWhite(game.position);
-        const delta = (after - before) * (playerColor === 'white' ? 1 : -1);
         lastActivityRef.current = Date.now();
         idleSaidRef.current = false;
         animateMove(move, Boolean(move.captured), /[+#]/.test(result.san));
         bump();
-        persist();
         setThinking(false);
         aiRef.current = false;
         playSound(move.captured ? 'capture' : 'move');
@@ -3356,11 +2791,18 @@ function DeepChessPanel(props) {
           finish(result.status, 'engine');
           return;
         }
-        const event = classifyMove(game, move, result.san, delta, false);
-        const ctx = moveCtx(game, move, result.san);
-        const special = specialFor(move, result.san, before, after);
-        if (!special || !saySpecial(special.key, ctx, special.mood)) say(event, ctx);
-        if (event === 'herBlunder') triggerShake();
+        const loss = estimateMoveLoss(game.lastMove.before, move);
+        const gain = (after - before) * (playerColor === 'white' ? -1 : 1);
+        const event = classifyDialogueMove(move, result.san, loss, false, gain);
+        const verdict = describeQuality(loss, gain, locale);
+        const ctx = moveContext(move, result.san, game.history.length, { byPlayer: false, loss, gain, verdict });
+        const special = event === 'herBlunder' ? null : selectSpecial(game, move, result.san, before, after, playerColor, factsRef.current, specialRef.current);
+        speechDirectorRef.current.deferFor(performance.now() - searchStarted);
+        if (!special || !saySpecial(special, ctx)) {
+          if (!maybeOpening(ctx, event)) say(event, ctx);
+        }
+        maybeStateComment();
+        persist();
       } catch (error) {
         setThinking(false);
         aiRef.current = false;
@@ -3383,25 +2825,27 @@ function DeepChessPanel(props) {
 
   React.useEffect(() => {
     const timer = setInterval(() => {
-      if (over || thinking || slowSaidRef.current) return;
+      if (over || thinking || menu || confirm || pendingPromo || drawPending || slowSaidRef.current || settings.banter === 'quiet') return;
+      if (typeof document !== 'undefined' && document.hidden) return;
       if (game.turn !== playerTurn) return;
       if (Date.now() - turnStartRef.current < 45000) return;
       slowSaidRef.current = true;
-      say('playerThinkLong', {}, 'tired');
+      say('playerThinkLong');
     }, 5000);
     return () => clearInterval(timer);
-  }, [over, thinking, gameColor, tick]);
+  }, [over, thinking, menu, confirm, pendingPromo, drawPending, gameColor, tick, settings.banter]);
 
   React.useEffect(() => {
     const timer = setInterval(() => {
-      if (over || thinking || menu || idleSaidRef.current) return;
+      if (over || thinking || menu || confirm || pendingPromo || drawPending || idleSaidRef.current || settings.banter === 'quiet') return;
+      if (typeof document !== 'undefined' && document.hidden) return;
       if (game.turn !== playerTurn) return;
       if (Date.now() - lastActivityRef.current < 75000) return;
       idleSaidRef.current = true;
-      say('idle', {}, game.history.length > 50 ? 'sleepy' : 'calm');
+      say('idle');
     }, 10000);
     return () => clearInterval(timer);
-  }, [over, thinking, menu, gameColor, tick]);
+  }, [over, thinking, menu, confirm, pendingPromo, drawPending, gameColor, tick, settings.banter]);
 
   const moodLabel = MOOD_LABEL[locale][mood] || mood;
   const movePairs = [];
@@ -3413,6 +2857,10 @@ function DeepChessPanel(props) {
     });
   }
   const recentPairs = movePairs.slice(-2);
+  const lastPair = movePairs[movePairs.length - 1];
+  const currentMoveText = lastPair
+    ? `${lastPair.n}. ${lastPair.white}${lastPair.black ? ` ${lastPair.black}` : ''}`
+    : t('moves.empty');
   const capturer = { you: [], her: [] };
   for (const entry of game.history) {
     if (!entry.move.captured) continue;
@@ -3480,10 +2928,9 @@ function DeepChessPanel(props) {
       React.createElement('div', { className: 'dc-bubble' },
         React.createElement('div', { className: 'dc-bubble-name' },
           t('name'),
-          React.createElement('span', { className: 'dc-mood-chip' }, moodLabel)),
-        thinking
-          ? React.createElement('div', { className: 'dc-typing' }, React.createElement('i'), React.createElement('i'), React.createElement('i'))
-          : React.createElement(Typewriter, { key: speechKey, text: speech || '……' }))),
+          React.createElement('span', { className: 'dc-mood-chip' }, moodLabel),
+          thinking ? React.createElement('span', { className: 'dc-typing', 'aria-label': t('turn.thinking') }, React.createElement('i'), React.createElement('i'), React.createElement('i')) : null),
+        React.createElement(Typewriter, { key: speechKey, text: speech || '……' }))),
     React.createElement('div', { className: 'dc-board-wrap' },
       React.createElement(Board, {
         game,
@@ -3491,7 +2938,7 @@ function DeepChessPanel(props) {
         onSquare,
         settings,
         hints: settings.hints,
-        disabled: over || thinking,
+        disabled: over || thinking || drawPending || game.turn !== playerTurn,
         playerColor,
         checkSquare,
         lastMove,
@@ -3509,7 +2956,7 @@ function DeepChessPanel(props) {
         React.createElement('span', null, `${t('captured.you')} ${capturer.you.length} : ${capturer.her.length} ${t('captured.her')}`))),
     React.createElement('div', { className: 'dc-actions' },
       React.createElement('button', { type: 'button', className: 'dc-btn gold', onClick: () => setConfirm('new') }, t('btn.new')),
-      React.createElement('button', { type: 'button', className: 'dc-btn', disabled: thinking || over || !game.history.length, onClick: undo }, t('btn.undo')),
+      React.createElement('button', { type: 'button', className: 'dc-btn', disabled: thinking || over || drawPending || !game.history.length, onClick: undo }, t('btn.undo')),
       React.createElement('button', { type: 'button', className: 'dc-btn', disabled: over, onClick: () => setConfirm('resign') }, t('btn.resign')),
       React.createElement('button', { type: 'button', className: 'dc-btn', disabled: over || thinking || drawPending, onClick: () => setConfirm('draw') }, t('btn.draw'))),
     React.createElement('div', { className: 'dc-moves', onClick: () => setMenu('moves'), role: 'button', tabIndex: 0 },
@@ -3518,9 +2965,10 @@ function DeepChessPanel(props) {
         recentPairs.length
           ? recentPairs.map((pair) => `${pair.n}. ${pair.white} ${pair.black}`).join('   ')
           : t('moves.empty')),
+      React.createElement('span', { className: 'dc-moves-now' }, currentMoveText),
       React.createElement('span', { className: 'dc-moves-more' }, '›')),
     React.createElement('div', { className: 'dc-foot' },
-      React.createElement('span', null, `${t('set.difficulty')} ${t(`diff.${settings.difficulty}`)}`),
+      React.createElement('span', null, `${t('set.difficulty')} ${t(`diff.${settings.difficulty}`)} · v${BUILD_VERSION}`),
       React.createElement('span', null, t('set.stats.value')
         .replace('{wins}', stats.wins)
         .replace('{losses}', stats.losses)
@@ -3578,7 +3026,7 @@ function DeepChessPanel(props) {
                 key: level,
                 type: 'button',
                 className: settings.difficulty === level ? 'on' : '',
-                onClick: () => setSettings((value) => ({ ...value, difficulty: level })),
+                onClick: () => changeDifficulty(level),
               }, t(`diff.${level}`))))),
           React.createElement('div', { className: 'dc-row' },
             React.createElement('span', { className: 'dc-row-label' }, t('set.side')),

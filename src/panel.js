@@ -5,14 +5,17 @@
  * pixel UI. The Host half is intentionally empty.
  */
 
+import { SpeechDirector, acceptsDraw, classifyDialogueMove, describeQuality, detectOpening, estimateMoveLoss, selectSpecial } from './dialogue.js';
+import { Banter, MOOD_LABEL, chooseMood, moveContext } from './persona.js';
+
 const PIECE_KEY = ['', 'p', 'n', 'b', 'r', 'q', 'k'];
-const QUEEN_TYPE = 5;
+const BUILD_VERSION = '0.5.0';
 const SAVE_KEY = 'deepchess.save.v1';
 const SETTINGS_KEY = 'deepchess.settings.v2';
 const STATS_KEY = 'deepchess.stats.v1';
 const KEY_EVENTS = new Set([
   'start', 'win', 'lose', 'draw', 'resign', 'undo', 'playerBlunder', 'herBlunder',
-  'queenCapture', 'promotion', 'playerCheck', 'herCheck',
+  'queenCapture', 'herQueenCapture', 'promotion', 'playerCheck', 'herCheck',
 ]);
 
 const DEFAULT_SETTINGS = {
@@ -65,54 +68,46 @@ function pieceSide(piece) {
   return colorOf(piece) === 0 ? 'w' : 'b';
 }
 
-function moveCtx(game, move, san) {
-  return {
-    move: san || '',
-    pieceKey: PIECE_KEY[typeOf(move.piece)] || 'p',
-    capturedKey: move.captured ? PIECE_KEY[typeOf(move.captured)] : '',
-    n: Math.floor(game.history.length / 2) + 1,
-  };
-}
-
-function classifyMove(game, move, san, delta, byPlayer) {
-  if (move.promotion) return 'promotion';
-  if (move.flags & 4) return 'castle';
-  if (move.flags & 2) return 'enPassant';
-  if (san.includes('+') || san.includes('#')) return byPlayer ? 'playerCheck' : 'herCheck';
-  if (move.captured) {
-    if (typeOf(move.captured) === QUEEN_TYPE) return 'queenCapture';
-    return byPlayer ? 'playerCapture' : 'herCapture';
-  }
-  if (delta > 140) return byPlayer ? 'playerBlunder' : 'herBlunder';
-  if (delta < -140) return byPlayer ? 'playerGood' : 'herGood';
-  return byPlayer ? 'playerQuiet' : 'herQuiet';
-}
-
-function Typewriter({ text, onDone }) {
+export function Typewriter({ text, onDone }) {
   const [shown, setShown] = React.useState(0);
+  const timerRef = React.useRef(null);
+  const doneRef = React.useRef(false);
+  const onDoneRef = React.useRef(onDone);
+  onDoneRef.current = onDone;
+  const chars = [...text];
+  function complete() {
+    clearTimeout(timerRef.current);
+    setShown(chars.length);
+    if (!doneRef.current) {
+      doneRef.current = true;
+      onDoneRef.current?.();
+    }
+  }
   React.useEffect(() => {
     setShown(0);
+    doneRef.current = false;
+    const letters = [...text];
     let index = 0;
-    let timer = null;
     const step = () => {
       index += 1;
       setShown(index);
-      if (index < text.length) {
-        const ch = text[index - 1];
-    const delay = /[，。！？…,.!?]/.test(ch) ? 130 : 22;
-        timer = setTimeout(step, delay);
-      } else if (onDone) {
-        onDone();
+      if (index < letters.length) {
+        const delay = /[，。！？…,.!?]/.test(letters[index - 1]) ? 130 : 22;
+        timerRef.current = setTimeout(step, delay);
+      } else if (!doneRef.current) {
+        doneRef.current = true;
+        onDoneRef.current?.();
       }
     };
-    timer = setTimeout(step, 60);
-    return () => clearTimeout(timer);
+    if (letters.length) timerRef.current = setTimeout(step, 60);
+    else complete();
+    return () => clearTimeout(timerRef.current);
   }, [text]);
-  const done = shown >= text.length;
+  const done = shown >= chars.length;
   return React.createElement(
     'div',
-    { className: 'dc-speech', onClick: () => setShown(text.length) },
-    text.slice(0, shown),
+    { className: 'dc-speech', onClick: complete },
+    chars.slice(0, shown).join(''),
     !done ? React.createElement('span', { className: 'dc-caret' }) : null,
   );
 }
@@ -129,7 +124,7 @@ function PixelGlyph({ name }) {
       teeth.map((box, index) => React.createElement('rect', {
         key: index, x: box[0], y: box[1], width: box[2], height: box[3], fill: 'currentColor',
       })),
-      React.createElement('rect', { x: 7, y: 7, width: 2, height: 2, fill: '#121a2a' }));
+      React.createElement('rect', { x: 7, y: 7, width: 2, height: 2, fill: 'var(--dc-bg)' }));
   }
   if (name === 'chat') {
     return React.createElement('svg', common,
@@ -147,11 +142,44 @@ function ChessWhaleGlyph(props) {
   },
   React.createElement('path', { d: 'M5 7h8v3h3v3h-3v4H5v-4H2v-3h3V7z', fill: 'currentColor' }),
   React.createElement('path', { d: 'M16 5l4-2v4l4 2-4 2V9l-4 2V5z', fill: 'currentColor' }),
-  React.createElement('rect', { x: 7, y: 9, width: 2, height: 2, fill: '#121a2a' }),
+  React.createElement('rect', { x: 7, y: 9, width: 2, height: 2, fill: 'var(--dc-bg)' }),
   React.createElement('rect', { x: 5, y: 18, width: 10, height: 2, fill: 'currentColor' }));
 }
 
 function Board({ game, selected, onSquare, settings, hints, disabled, playerColor, checkSquare, lastMove, boardRef, anim, boardShake }) {
+  const initialFocus = selected != null
+    ? selected
+    : lastMove?.to ?? game.position.kings[colorIndex(playerColor)] ?? 0;
+  const [focusSq, setFocusSq] = React.useState(initialFocus);
+  const squareRefs = React.useRef({});
+  const rankStep = settings.flip ? -1 : 1;
+  const fileStep = settings.flip ? 1 : -1;
+  function focusSquare(sq) {
+    setFocusSq(sq);
+    // Focusing immediately also works for a square whose tabIndex is still -1;
+    // the state update promotes it to the single roving tab stop.
+    squareRefs.current[sq]?.focus();
+  }
+  function onSquareKey(event, sq) {
+    let next = null;
+    const rank = sq >> 4;
+    const file = sq & 15;
+    if (event.key === 'ArrowUp') next = (rank + rankStep) * 16 + file;
+    else if (event.key === 'ArrowDown') next = (rank - rankStep) * 16 + file;
+    else if (event.key === 'ArrowLeft') next = rank * 16 + file + fileStep;
+    else if (event.key === 'ArrowRight') next = rank * 16 + file - fileStep;
+    if (next != null) {
+      event.preventDefault();
+      const nextRank = next >> 4;
+      const nextFile = next & 15;
+      if (nextRank >= 0 && nextRank < 8 && nextFile >= 0 && nextFile < 8) focusSquare(next);
+      return;
+    }
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      if (!disabled) onSquare(sq);
+    }
+  }
   const cells = [];
   const ranks = settings.flip ? [0, 1, 2, 3, 4, 5, 6, 7] : [7, 6, 5, 4, 3, 2, 1, 0];
   const files = settings.flip ? [7, 6, 5, 4, 3, 2, 1, 0] : [0, 1, 2, 3, 4, 5, 6, 7];
@@ -179,9 +207,12 @@ function Board({ game, selected, onSquare, settings, hints, disabled, playerColo
         type: 'button',
         className: classes.join(' '),
         'aria-label': squareName(sq),
-        onClick: () => onSquare(sq),
-        disabled,
-        tabIndex: 0,
+        'aria-disabled': disabled ? 'true' : undefined,
+        onClick: () => { if (!disabled) onSquare(sq); },
+        onFocus: () => setFocusSq(sq),
+        onKeyDown: (event) => onSquareKey(event, sq),
+        ref: (element) => { squareRefs.current[sq] = element; },
+        tabIndex: focusSq === sq ? 0 : -1,
       },
       piece
         ? React.createElement('img', {
@@ -228,7 +259,7 @@ export function DeepChessPanel(props) {
     bootRef.current = {
       game,
       save,
-      color: save?.playerColor === 'black' ? 'black' : 'white',
+      color: (save?.playerColor || loadSettings().playerColor) === 'black' ? 'black' : 'white',
     };
   }
   const game = bootRef.current.game;
@@ -248,7 +279,6 @@ export function DeepChessPanel(props) {
   const [menu, setMenu] = React.useState(null);
   const [confirm, setConfirm] = React.useState(null);
   const [toast, setToast] = React.useState('');
-  const [undoCount, setUndoCount] = React.useState(0);
   const [log, setLog] = React.useState([]);
   const [shaking, setShaking] = React.useState(false);
   const [anim, setAnim] = React.useState(null);
@@ -266,13 +296,18 @@ export function DeepChessPanel(props) {
   const toastTimer = React.useRef(null);
   const shakeTimer = React.useRef(null);
   const audioRef = React.useRef(null);
-  const factsRef = React.useRef({ blunders: 0, undos: 0 });
-  const specialRef = React.useRef(new Set());
+  const factsRef = React.useRef({ blunders: 0, blunderStreak: 0, undos: 0, ...boot.save?.facts });
+  const specialRef = React.useRef(new Set(Array.isArray(boot.save?.specials) ? boot.save.specials : []));
   const turnStartRef = React.useRef(Date.now());
   const slowSaidRef = React.useRef(false);
   const moodHistoryRef = React.useRef([]);
   const lastActivityRef = React.useRef(Date.now());
   const idleSaidRef = React.useRef(false);
+  const speechDirectorRef = React.useRef(null);
+  const openingSaidRef = React.useRef('');
+  const lowSaidRef = React.useRef(false);
+  const longSaidRef = React.useRef(false);
+  if (!speechDirectorRef.current) speechDirectorRef.current = new SpeechDirector(showSpeech);
 
   const playerColor = gameColor;
   const herColor = playerColor === 'white' ? 'black' : 'white';
@@ -284,7 +319,16 @@ export function DeepChessPanel(props) {
 
   React.useEffect(() => {
     banterRef.current.setLocale(locale);
+    speechDirectorRef.current.reset();
   }, [locale]);
+
+  React.useEffect(() => () => {
+    speechDirectorRef.current.reset();
+    clearTimeout(drawTimer.current);
+    clearTimeout(toastTimer.current);
+    clearTimeout(shakeTimer.current);
+    clearTimeout(animTimer.current);
+  }, []);
 
   function showToast(text) {
     setToast(text);
@@ -292,88 +336,58 @@ export function DeepChessPanel(props) {
     toastTimer.current = setTimeout(() => setToast(''), 1600);
   }
 
-  function saySpecial(key, ctx, mood) {
-    if (specialRef.current.has(key)) return false;
-    specialRef.current.add(key);
-    say(key, ctx, mood, true);
+  function maybeOpening(ctx, event) {
+    if (event !== 'playerQuiet' && event !== 'herQuiet') return false;
+    if (game.history.length < 4 || game.history.length > 14) return false;
+    const opening = detectOpening(game.history);
+    if (!opening || opening.generic || openingSaidRef.current === opening.key) return false;
+    openingSaidRef.current = opening.key;
+    say('opening', {
+      ...ctx,
+      openingKey: opening.key,
+      opening: locale === 'en' ? opening.en : opening.zh,
+    }, 'thinking', true);
     return true;
   }
 
-  function specialFor(move, san, before, after) {
-    const sign = playerColor === 'white' ? 1 : -1;
-    const beforeP = before * sign;
-    const afterP = after * sign;
-    let captures = 0;
-    let checks = 0;
-    for (const entry of game.history) {
-      if (entry.move.captured) captures += 1;
-      if (/[+#]/.test(entry.san)) checks += 1;
-    }
-    let queens = 0;
+  function maybeStateComment() {
+    if (over) return;
     let pieces = 0;
     for (let sq = 0; sq < 128; sq += 1) {
-      if ((sq & 0x88) !== 0) continue;
-      const piece = game.position.at(sq);
-      if (!piece) continue;
-      const type = typeOf(piece);
-      if (type === QUEEN_TYPE) queens += 1;
-      if (type !== 6) pieces += 1;
+      if ((sq & 0x88) !== 0 || !game.position.at(sq)) continue;
+      if (typeOf(game.position.at(sq)) !== 6) pieces += 1;
     }
-    const used = specialRef.current;
-    if (move.promotion && typeOf(move.promotion) !== QUEEN_TYPE && !used.has('underpromotion')) {
-      return { key: 'underpromotion', mood: 'surprised' };
+    if (!lowSaidRef.current && pieces <= 6) {
+      lowSaidRef.current = true;
+      say('lowMaterial', {}, 'determined', true);
+    } else if (!longSaidRef.current && game.history.length >= 40) {
+      longSaidRef.current = true;
+      say('longGame', {}, 'tired', true);
     }
-    if (captures === 1 && move.captured && !used.has('firstCapture')) {
-      return { key: 'firstCapture', mood: 'surprised' };
-    }
-    if (checks === 1 && /[+#]/.test(san) && !used.has('firstCheck')) {
-      return { key: 'firstCheck', mood: 'panic' };
-    }
-    if (queens === 0 && !used.has('queenTrade')) return { key: 'queenTrade', mood: 'surprised' };
-    if (((beforeP < -250 && afterP > 250) || (beforeP > 250 && afterP < -250)) && !used.has('comeback')) {
-      return { key: 'comeback', mood: 'panic' };
-    }
-    if (factsRef.current.blunders === 3 && !used.has('blunderStreak')) {
-      return { key: 'blunderStreak', mood: 'laugh' };
-    }
-    if (game.history.length >= 60 && !used.has('longGameSpecial')) {
-      return { key: 'longGameSpecial', mood: 'tired' };
-    }
-    if (pieces <= 6 && !used.has('lowMaterialSpecial')) {
-      return { key: 'lowMaterialSpecial', mood: 'determined' };
-    }
-    return null;
+  }
+
+  function saySpecial(key, ctx, mood) {
+    if (specialRef.current.has(key)) return false;
+    const accepted = say(key, ctx, mood, true);
+    if (accepted) specialRef.current.add(key);
+    return accepted;
   }
 
   function poke() {
-    if (pendingPromo || menu) return;
+    if (pendingPromo || menu || drawPending) return;
     let nextMood = mood;
-    if (!['angry', 'annoyed'].includes(mood) && Math.random() < 0.16) nextMood = 'love';
-    else if (mood === 'calm' || mood === 'smile') nextMood = 'pout';
-    else if (mood === 'thinking') nextMood = 'annoyed';
-    rememberMood(nextMood);
-    const line = banterRef.current.pick('poke', {}, nextMood);
-    setSpeech(line);
-    setSpeechKey((key) => key + 1);
-    pushLog('her', line);
-    if (nextMood === 'annoyed' || nextMood === 'angry' || nextMood === 'panic') triggerShake();
+    if (game.inCheck() && game.turn !== playerTurn && !over) nextMood = 'panic';
+    else if (thinking) nextMood = 'annoyed';
+    else if (!over) nextMood = ['love', 'embarrassed', 'pout', 'laugh'][Math.floor(Math.random() * 4)];
+    say('poke', {}, nextMood, true);
+    lastActivityRef.current = Date.now();
+    idleSaidRef.current = false;
   }
 
   function changeDifficulty(id) {
     if (id === settings.difficulty) return;
     setSettings((value) => ({ ...value, difficulty: id }));
-    const lines = {
-      easy: '行，我摸鱼。',
-      normal: '好，我放点水。',
-      hard: '行，我认真了。',
-      whale: '鲸鱼模式。你确定？',
-      master: '深渊模式……输了别哭。',
-    };
-    const line = lines[id];
-    rememberMood(id === 'master' || id === 'whale' ? 'determined' : 'smug');
-    setSpeech(line);
-    setSpeechKey((key) => key + 1);
-    pushLog('her', line);
+    if (!over) say('difficulty', { difficulty: id }, id === 'master' || id === 'whale' ? 'determined' : 'smile', true);
     showToast(`${t('set.difficulty')} · ${t(`diff.${id}`)}`);
   }
 
@@ -427,6 +441,8 @@ export function DeepChessPanel(props) {
       ucis: game.history.map((entry) => entry.uci),
       manual: nextManual,
       playerColor: nextColor,
+      facts: factsRef.current,
+      specials: [...specialRef.current],
       savedAt: Date.now(),
     });
   }
@@ -468,9 +484,21 @@ export function DeepChessPanel(props) {
     setLog((items) => [...items.slice(-79), { who, text }]);
   }
 
-  function say(event, ctx, nextMood, force = false) {
+  function showSpeech(line) {
+    banterRef.current.remember(line.text, line.event);
+    rememberMood(line.mood);
+    setSpeech(line.text);
+    setSpeechKey((key) => key + 1);
+    pushLog('her', line.text);
+    if (line.mood === 'angry' || line.mood === 'panic') triggerShake();
+  }
+
+  function say(event, ctx = {}, nextMood, force = false) {
+    const ambient = ['idle', 'playerThinkLong', 'herThink'].includes(event);
+    const probability = settings.banter === 'quiet' ? 0.08 : settings.banter === 'chatty' ? 0.9 : event === 'playerQuiet' ? 0.55 : 0.72;
+    if (!force && !KEY_EVENTS.has(event) && Math.random() > probability) return false;
     const flavour = nextMood || chooseMood({
-      status: outcome,
+      status: manual || game.status(),
       evalWhite: evaluateWhite(game.position),
       event,
       playerColor,
@@ -479,31 +507,19 @@ export function DeepChessPanel(props) {
       moveCount: game.history.length,
       recentMoods: moodHistoryRef.current,
     });
-    rememberMood(flavour);
-    const probability = settings.banter === 'quiet' ? 0.1 : settings.banter === 'chatty' ? 0.92 : 0.52;
-    if (!force && !KEY_EVENTS.has(event) && Math.random() > probability) return;
-    let text = banterRef.current.pick(event, ctx, flavour);
-    if (event === 'start') {
-      if (settings.difficulty === 'master') {
-        text = '深渊模式。输了别哭。';
-        rememberMood('determined');
-      } else if (settings.difficulty === 'whale') {
-        text = '鲸鱼模式。你确定？';
-        rememberMood('determined');
-      }
-    }
-    if (event === 'playerBlunder' && factsRef.current.blunders >= 2 && Math.random() < 0.18) {
-      text = banterRef.current.pick('callback', ctx, flavour);
-    }
-    setSpeech(text);
-    setSpeechKey((key) => key + 1);
-    pushLog('her', text);
-    if (flavour === 'angry' || flavour === 'panic' || flavour === 'annoyed') triggerShake();
+    const picked = banterRef.current.pickDetailed(event, ctx, flavour, false);
+    const lineMood = nextMood || picked.mood || flavour;
+    return speechDirectorRef.current.speak({
+      event, text: picked.text, mood: lineMood,
+      priority: ambient ? 0 : ['win', 'lose', 'draw', 'resign', 'checkmateWin', 'checkmateLose', 'threefold', 'fiftyMove'].includes(event) ? 3 : force || KEY_EVENTS.has(event) ? 2 : 1,
+    });
   }
 
   function finish(status, source) {
     if (settledRef.current) return;
     settledRef.current = true;
+    clearTimeout(drawTimer.current);
+    setDrawPending(false);
     const draw = !status.winner;
     const playerWon = status.winner === playerColor;
     setManual(status);
@@ -522,91 +538,47 @@ export function DeepChessPanel(props) {
     writeJSON(STATS_KEY, next);
     setThinking(false);
     aiRef.current = false;
-    if (source === 'resign') {
-      const line = banterRef.current.pick('resign', {}, 'smug');
-      rememberMood('smug');
-      setSpeech(line);
-      pushLog('her', line);
-      playSound('win');
-      return;
-    }
-    if (source === 'agreement') {
-      const line = banterRef.current.pick('draw', {}, 'calm');
-      rememberMood('calm');
-      setSpeech(line);
-      pushLog('her', line);
-      return;
-    }
-    let specialKey = null;
-    let specialMood = 'calm';
-    if (status.state === 'checkmate') {
-      specialKey = playerWon ? 'checkmateLose' : 'checkmateWin';
-      specialMood = playerWon ? 'cry' : 'smug';
-    } else if (status.reason === 'repetition') {
-      specialKey = 'threefold';
-    } else if (status.reason === 'fifty-move') {
-      specialKey = 'fiftyMove';
-    }
-    if (specialKey && !specialRef.current.has(specialKey)) {
-      specialRef.current.add(specialKey);
-      const line = banterRef.current.pick(specialKey, {}, specialMood);
-      rememberMood(specialMood);
-      setSpeech(line);
-      pushLog('her', line);
-      playSound(playerWon ? 'lose' : 'win');
-      return;
-    }
-    if (draw) {
-      const line = banterRef.current.pick('draw', {}, 'calm');
-      rememberMood('calm');
-      setSpeech(line);
-      pushLog('her', line);
-      playSound('move');
-    } else if (playerWon) {
-      const line = banterRef.current.pick('lose', {}, stats.streak > 2 ? 'cry' : 'sad');
-      rememberMood(stats.streak > 2 ? 'cry' : 'sad');
-      setSpeech(line);
-      pushLog('her', line);
-      playSound('lose');
-    } else {
-      const winMood = Math.random() < 0.3 ? 'love' : Math.random() < 0.5 ? 'wink' : 'smug';
-      const line = banterRef.current.pick('win', {}, winMood);
-      rememberMood(winMood);
-      setSpeech(line);
-      pushLog('her', line);
-      playSound('win');
-    }
+    const event = source === 'resign' ? 'resign'
+      : status.state === 'checkmate' ? playerWon ? 'checkmateLose' : 'checkmateWin'
+        : status.reason === 'repetition' ? 'threefold'
+          : status.reason === 'fifty-move' ? 'fiftyMove'
+            : draw ? 'draw' : playerWon ? 'lose' : 'win';
+    const finalMood = chooseMood({ status, playerColor, recentMoods: moodHistoryRef.current });
+    say(event, {}, source === 'resign' ? 'smile' : finalMood, true);
+    playSound(draw ? 'move' : playerWon ? 'lose' : 'win');
   }
 
   function afterPlayerMove(move, result, before) {
     const after = evaluateWhite(game.position);
-    const delta = (before - after) * (playerColor === 'white' ? 1 : -1);
-    const event = classifyMove(game, move, result.san, delta, true);
-    const ctx = moveCtx(game, move, result.san);
+    const loss = result.status.state === 'playing' ? estimateMoveLoss(game.lastMove.before, move) : 0;
+    const gain = (after - before) * (playerColor === 'white' ? 1 : -1);
+    const event = classifyDialogueMove(move, result.san, loss, true, gain);
+    const verdict = describeQuality(loss, gain, locale);
+    const ctx = moveContext(move, result.san, game.history.length, { byPlayer: true, loss, gain, verdict });
+    speechDirectorRef.current.beginTurn();
     lastActivityRef.current = Date.now();
     idleSaidRef.current = false;
     animateMove(move, Boolean(move.captured), /[+#]/.test(result.san));
     bump();
-    persist();
     playSound(move.captured ? 'capture' : 'move');
     if (result.status.state !== 'playing') {
       finish(result.status, 'engine');
       return;
     }
     setSelected(null);
-    if (event === 'playerBlunder') factsRef.current.blunders += 1;
-    const special = specialFor(move, result.san, before, after);
-    if (!special || !saySpecial(special.key, { ...ctx, blunders: factsRef.current.blunders, undos: factsRef.current.undos }, special.mood)) {
-      say(event, { ...ctx, blunders: factsRef.current.blunders, undos: factsRef.current.undos });
+    if (loss >= 180) factsRef.current.blunders += 1;
+    factsRef.current.blunderStreak = loss >= 180 ? factsRef.current.blunderStreak + 1 : 0;
+    const special = event === 'playerBlunder' ? null : selectSpecial(game, move, result.san, before, after, playerColor, factsRef.current, specialRef.current);
+    if (!special || !saySpecial(special, { ...ctx, blunders: factsRef.current.blunders, undos: factsRef.current.undos })) {
+      const fullCtx = { ...ctx, blunders: factsRef.current.blunders, undos: factsRef.current.undos };
+      if (!maybeOpening(fullCtx, event)) say(event, fullCtx);
     }
-    if (event === 'playerBlunder') {
-      rememberMood('laugh');
-      triggerShake();
-    }
+    maybeStateComment();
+    persist();
   }
 
   function playMove(from, to, promotion = 0) {
-    if (over || thinking) return;
+    if (over || thinking || drawPending || game.turn !== playerTurn) return;
     const before = evaluateWhite(game.position);
     const result = game.playUci(from, to, promotion);
     if (!result) return;
@@ -614,7 +586,7 @@ export function DeepChessPanel(props) {
   }
 
   function onSquare(sq) {
-    if (over || thinking) return;
+    if (over || thinking || drawPending || game.turn !== playerTurn) return;
     const piece = game.position.at(sq);
     const own = piece !== 0 && colorOf(piece) === playerTurn;
     if (selected == null) {
@@ -645,7 +617,7 @@ export function DeepChessPanel(props) {
   }
 
   function undo() {
-    if (thinking || over) return;
+    if (thinking || over || drawPending) return;
     if (!game.history.length) {
       showToast(t('toast.noUndo'));
       return;
@@ -653,45 +625,43 @@ export function DeepChessPanel(props) {
     game.undo();
     if (game.history.length && game.turn !== playerTurn) game.undo();
     setSelected(null);
-    setUndoCount((n) => n + 1);
     factsRef.current.undos += 1;
+    factsRef.current.blunderStreak = 0;
+    speechDirectorRef.current.reset();
     lastActivityRef.current = Date.now();
     idleSaidRef.current = false;
     bump();
     persist();
     playSound('move');
-    say('undo', { undos: factsRef.current.undos, n: Math.floor(game.history.length / 2) + 1 }, 'annoyed', true);
+    say('undo', { undos: factsRef.current.undos, n: Math.ceil(game.history.length / 2) || 1 }, undefined, true);
   }
 
   function startNew() {
+    const rematch = over;
     if (drawTimer.current) clearTimeout(drawTimer.current);
     setDrawPending(false);
     bootRef.current.game = new ChessGame();
     aiRef.current = false;
     settledRef.current = false;
-    factsRef.current = { blunders: 0, undos: 0 };
+    factsRef.current = { blunders: 0, blunderStreak: 0, undos: 0 };
     specialRef.current = new Set();
+    openingSaidRef.current = '';
+    lowSaidRef.current = false;
+    longSaidRef.current = false;
+    speechDirectorRef.current.reset();
     setManual(null);
     setGameColor(settings.playerColor);
     setSelected(null);
     setPendingPromo(null);
-    setUndoCount(0);
     setThinking(false);
     lastActivityRef.current = Date.now();
     idleSaidRef.current = false;
     moodHistoryRef.current = [];
-    rememberMood(settings.difficulty === 'master' || settings.difficulty === 'whale' ? 'determined' : 'smile');
-    setSpeech('');
     writeJSON(SAVE_KEY, { v: 1, ucis: [], manual: null, playerColor: settings.playerColor, savedAt: Date.now() });
     bump();
-    const startLine = settings.difficulty === 'master'
-      ? '深渊模式。输了别哭。'
-      : settings.difficulty === 'whale'
-        ? '鲸鱼模式。你确定？'
-        : banterRef.current.pick('start', {}, 'smile');
-    setSpeech(startLine);
-    setSpeechKey((key) => key + 1);
-    pushLog('her', '新的一局。');
+    const startEvent = rematch ? 'rematch' : 'start';
+    speechDirectorRef.current.speak({ event: startEvent, mood: 'smile', priority: 2,
+      text: banterRef.current.pick(startEvent, { playerColor: settings.playerColor }, 'smile', false) });
     showToast(t('toast.new'));
   }
 
@@ -701,21 +671,15 @@ export function DeepChessPanel(props) {
   }
 
   function resolveDraw() {
-    if (game.status().state !== 'playing') {
+    if (settledRef.current || game.status().state !== 'playing') {
       setDrawPending(false);
       return;
     }
-    const perspective = (evaluateWhite(game.position)) * (playerColor === 'white' ? 1 : -1);
-    const accept = perspective < -280 ? Math.random() < 0.7 : Math.abs(perspective) < 80 ? Math.random() < 0.35 : false;
+    const accept = acceptsDraw(evaluateWhite(game.position), playerColor);
     if (accept) {
       finish({ state: 'draw', winner: null, reason: 'agreement' }, 'agreement');
     } else {
-      const mood = perspective > 120 ? 'smug' : 'pout';
-      rememberMood(mood);
-      const line = banterRef.current.pick('drawRefuse', {}, mood);
-      setSpeech(line);
-      setSpeechKey((key) => key + 1);
-      pushLog('her', line);
+      say('drawRefuse', {}, undefined, true);
       showToast(t('toast.drawRefused'));
     }
   }
@@ -724,9 +688,8 @@ export function DeepChessPanel(props) {
     setConfirm(null);
     if (over || thinking || drawPending) return;
     setDrawPending(true);
-    rememberMood('thinking');
-    setSpeech(t('draw.thinking'));
-    setSpeechKey((key) => key + 1);
+    speechDirectorRef.current.reset();
+    say('drawOffer', {}, 'thinking', true);
     if (drawTimer.current) clearTimeout(drawTimer.current);
     drawTimer.current = setTimeout(() => {
       setDrawPending(false);
@@ -737,22 +700,18 @@ export function DeepChessPanel(props) {
   React.useEffect(() => {
     if (startedRef.current) return;
     startedRef.current = true;
-    if (boot.save?.manual) {
+    if (over) {
       settledRef.current = true;
-      const won = boot.save.manual.winner === gameColor;
-      const event = !boot.save.manual.winner ? 'draw' : won ? 'lose' : 'win';
-      rememberMood(event === 'draw' ? 'calm' : won ? 'sad' : 'smug');
-      setSpeech(banterRef.current.pick(event, {}, event === 'win' ? 'smug' : 'calm'));
-      persist(boot.save.manual, gameColor);
+      const won = outcome.winner === gameColor;
+      const event = !outcome.winner ? 'draw' : won ? 'lose' : 'win';
+      say(event, {}, chooseMood({ status: outcome, playerColor: gameColor }), true);
+      persist(outcome, gameColor);
       return;
     }
     if (game.history.length) {
-      rememberMood('calm');
-      setSpeech('接着下？');
-      pushLog('her', '接着下？');
+      say('resume', {}, 'smile', true);
     } else {
-      setSpeech(banterRef.current.pick('start', {}, 'smile'));
-      rememberMood('smile');
+      say('start', { playerColor: gameColor }, 'smile', true);
     }
     persist(boot.save?.manual || null, gameColor);
   }, []);
@@ -764,10 +723,10 @@ export function DeepChessPanel(props) {
     if (aiRef.current) return;
     aiRef.current = true;
     setThinking(true);
-    rememberMood('thinking');
     if (Math.random() < 0.24) say('herThink', {}, 'thinking');
     const timer = setTimeout(() => {
       if (!aiRef.current) return;
+      const searchStarted = performance.now();
       try {
         const before = evaluateWhite(game.position);
         const pick = chooseMove(game.position, settings.difficulty);
@@ -779,12 +738,10 @@ export function DeepChessPanel(props) {
         const move = pick.move;
         const result = game.play(move);
         const after = evaluateWhite(game.position);
-        const delta = (after - before) * (playerColor === 'white' ? 1 : -1);
         lastActivityRef.current = Date.now();
         idleSaidRef.current = false;
         animateMove(move, Boolean(move.captured), /[+#]/.test(result.san));
         bump();
-        persist();
         setThinking(false);
         aiRef.current = false;
         playSound(move.captured ? 'capture' : 'move');
@@ -792,11 +749,18 @@ export function DeepChessPanel(props) {
           finish(result.status, 'engine');
           return;
         }
-        const event = classifyMove(game, move, result.san, delta, false);
-        const ctx = moveCtx(game, move, result.san);
-        const special = specialFor(move, result.san, before, after);
-        if (!special || !saySpecial(special.key, ctx, special.mood)) say(event, ctx);
-        if (event === 'herBlunder') triggerShake();
+        const loss = estimateMoveLoss(game.lastMove.before, move);
+        const gain = (after - before) * (playerColor === 'white' ? -1 : 1);
+        const event = classifyDialogueMove(move, result.san, loss, false, gain);
+        const verdict = describeQuality(loss, gain, locale);
+        const ctx = moveContext(move, result.san, game.history.length, { byPlayer: false, loss, gain, verdict });
+        const special = event === 'herBlunder' ? null : selectSpecial(game, move, result.san, before, after, playerColor, factsRef.current, specialRef.current);
+        speechDirectorRef.current.deferFor(performance.now() - searchStarted);
+        if (!special || !saySpecial(special, ctx)) {
+          if (!maybeOpening(ctx, event)) say(event, ctx);
+        }
+        maybeStateComment();
+        persist();
       } catch (error) {
         setThinking(false);
         aiRef.current = false;
@@ -819,25 +783,27 @@ export function DeepChessPanel(props) {
 
   React.useEffect(() => {
     const timer = setInterval(() => {
-      if (over || thinking || slowSaidRef.current) return;
+      if (over || thinking || menu || confirm || pendingPromo || drawPending || slowSaidRef.current || settings.banter === 'quiet') return;
+      if (typeof document !== 'undefined' && document.hidden) return;
       if (game.turn !== playerTurn) return;
       if (Date.now() - turnStartRef.current < 45000) return;
       slowSaidRef.current = true;
-      say('playerThinkLong', {}, 'tired');
+      say('playerThinkLong');
     }, 5000);
     return () => clearInterval(timer);
-  }, [over, thinking, gameColor, tick]);
+  }, [over, thinking, menu, confirm, pendingPromo, drawPending, gameColor, tick, settings.banter]);
 
   React.useEffect(() => {
     const timer = setInterval(() => {
-      if (over || thinking || menu || idleSaidRef.current) return;
+      if (over || thinking || menu || confirm || pendingPromo || drawPending || idleSaidRef.current || settings.banter === 'quiet') return;
+      if (typeof document !== 'undefined' && document.hidden) return;
       if (game.turn !== playerTurn) return;
       if (Date.now() - lastActivityRef.current < 75000) return;
       idleSaidRef.current = true;
-      say('idle', {}, game.history.length > 50 ? 'sleepy' : 'calm');
+      say('idle');
     }, 10000);
     return () => clearInterval(timer);
-  }, [over, thinking, menu, gameColor, tick]);
+  }, [over, thinking, menu, confirm, pendingPromo, drawPending, gameColor, tick, settings.banter]);
 
   const moodLabel = MOOD_LABEL[locale][mood] || mood;
   const movePairs = [];
@@ -849,6 +815,10 @@ export function DeepChessPanel(props) {
     });
   }
   const recentPairs = movePairs.slice(-2);
+  const lastPair = movePairs[movePairs.length - 1];
+  const currentMoveText = lastPair
+    ? `${lastPair.n}. ${lastPair.white}${lastPair.black ? ` ${lastPair.black}` : ''}`
+    : t('moves.empty');
   const capturer = { you: [], her: [] };
   for (const entry of game.history) {
     if (!entry.move.captured) continue;
@@ -916,10 +886,9 @@ export function DeepChessPanel(props) {
       React.createElement('div', { className: 'dc-bubble' },
         React.createElement('div', { className: 'dc-bubble-name' },
           t('name'),
-          React.createElement('span', { className: 'dc-mood-chip' }, moodLabel)),
-        thinking
-          ? React.createElement('div', { className: 'dc-typing' }, React.createElement('i'), React.createElement('i'), React.createElement('i'))
-          : React.createElement(Typewriter, { key: speechKey, text: speech || '……' }))),
+          React.createElement('span', { className: 'dc-mood-chip' }, moodLabel),
+          thinking ? React.createElement('span', { className: 'dc-typing', 'aria-label': t('turn.thinking') }, React.createElement('i'), React.createElement('i'), React.createElement('i')) : null),
+        React.createElement(Typewriter, { key: speechKey, text: speech || '……' }))),
     React.createElement('div', { className: 'dc-board-wrap' },
       React.createElement(Board, {
         game,
@@ -927,7 +896,7 @@ export function DeepChessPanel(props) {
         onSquare,
         settings,
         hints: settings.hints,
-        disabled: over || thinking,
+        disabled: over || thinking || drawPending || game.turn !== playerTurn,
         playerColor,
         checkSquare,
         lastMove,
@@ -945,7 +914,7 @@ export function DeepChessPanel(props) {
         React.createElement('span', null, `${t('captured.you')} ${capturer.you.length} : ${capturer.her.length} ${t('captured.her')}`))),
     React.createElement('div', { className: 'dc-actions' },
       React.createElement('button', { type: 'button', className: 'dc-btn gold', onClick: () => setConfirm('new') }, t('btn.new')),
-      React.createElement('button', { type: 'button', className: 'dc-btn', disabled: thinking || over || !game.history.length, onClick: undo }, t('btn.undo')),
+      React.createElement('button', { type: 'button', className: 'dc-btn', disabled: thinking || over || drawPending || !game.history.length, onClick: undo }, t('btn.undo')),
       React.createElement('button', { type: 'button', className: 'dc-btn', disabled: over, onClick: () => setConfirm('resign') }, t('btn.resign')),
       React.createElement('button', { type: 'button', className: 'dc-btn', disabled: over || thinking || drawPending, onClick: () => setConfirm('draw') }, t('btn.draw'))),
     React.createElement('div', { className: 'dc-moves', onClick: () => setMenu('moves'), role: 'button', tabIndex: 0 },
@@ -954,9 +923,10 @@ export function DeepChessPanel(props) {
         recentPairs.length
           ? recentPairs.map((pair) => `${pair.n}. ${pair.white} ${pair.black}`).join('   ')
           : t('moves.empty')),
+      React.createElement('span', { className: 'dc-moves-now' }, currentMoveText),
       React.createElement('span', { className: 'dc-moves-more' }, '›')),
     React.createElement('div', { className: 'dc-foot' },
-      React.createElement('span', null, `${t('set.difficulty')} ${t(`diff.${settings.difficulty}`)}`),
+      React.createElement('span', null, `${t('set.difficulty')} ${t(`diff.${settings.difficulty}`)} · v${BUILD_VERSION}`),
       React.createElement('span', null, t('set.stats.value')
         .replace('{wins}', stats.wins)
         .replace('{losses}', stats.losses)
@@ -1014,7 +984,7 @@ export function DeepChessPanel(props) {
                 key: level,
                 type: 'button',
                 className: settings.difficulty === level ? 'on' : '',
-                onClick: () => setSettings((value) => ({ ...value, difficulty: level })),
+                onClick: () => changeDifficulty(level),
               }, t(`diff.${level}`))))),
           React.createElement('div', { className: 'dc-row' },
             React.createElement('span', { className: 'dc-row-label' }, t('set.side')),

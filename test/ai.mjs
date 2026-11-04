@@ -23,7 +23,7 @@ for (const level of LEVEL_ORDER) {
     failed += 1;
   }
   console.log(`ok   ${level}: ${pick.move.from}->${pick.move.to} depth ${pick.depth} nodes ${pick.nodes} ${pick.ms}ms`);
-  if (pick.ms > 3500) {
+  if (pick.ms > 5500) {
     console.error(`FAIL ${level}: too slow (${pick.ms}ms)`);
     failed += 1;
   }

@@ -46,7 +46,7 @@ if (!existsSync(fontPath)) {
   process.exit(1);
 }
 
-const modules = ['engine.js', 'ai.js', 'persona.js', 'i18n.js', 'styles.js', 'panel.js', 'apply.js'];
+const modules = ['engine.js', 'ai.js', 'persona.js', 'dialogue.js', 'i18n.js', 'styles.js', 'panel.js', 'apply.js'];
 const body = modules.map((name) => strip(readFileSync(join(here, name), 'utf8'))).join('\n\n');
 
 const assets = {
