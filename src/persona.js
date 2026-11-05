@@ -45,7 +45,7 @@ const T = {
   herCheck: {
     _: ['将军哦。先看看王这边，别急。', '我走{move}，将军。你慢慢想。', '我将军啦。接下来要先应将哦。'],
     smug: ['哼哼，将到了。不过你慢慢想，我等着。', '这一将，算是我的小小回礼。'],
-    wink: ['将军～你的王要挪挪位置啦。', '这一手接好哦。我有在认真下。'],
+    wink: ['将军～看看怎么接这一将吧。', '这一手接好哦。我有在认真下。'],
   },
   playerBlunder: {
     _: ['唔，这步可能有点亏。要不要再看看？', '这一步好像留了点破绽，我会接着下哦。', '这里可能漏看了一点。没关系，我们慢慢来。', '欸，这步我有机会了。下次记得多看一眼呀。', '这一手有点可惜。不过棋还没下完呢。'],
@@ -105,8 +105,8 @@ const T = {
   herQueenCapture: { _: ['你的后，我收下啦。棋还没结束，我们继续。', '吃到后啦。下一步也得认真看。'], smug: ['哼哼，这个后归我啦。我有点得意了。'], surprised: ['欸，我吃到你的后啦。让我再看一眼棋盘。'] },
   drawOffer: { _: ['用户想和棋呀？让我看看现在的局面。', '收到提和。我想一小会儿。'] },
   drawRefuse: { _: ['这盘我还想接着下，可以再陪我走几步吗？', '唔，现在先不和啦。我还想试试别的走法。', '我还想认真下完这一盘。我们继续吧。'], smug: ['哼哼，我还有小计划呢。先不和啦。'], pout: ['唔，还没下够呢。再陪我走几步嘛。'] },
-  drawAsk: { _: ['这局有点胶着。要不要和棋？', '再下下去要半夜了，和了吧？', '我看局面差不多了，和棋收场？'], thinking: ['让我算一下……嗯，和棋也许不错。'], smug: ['要不要和棋？我觉得这样对你比较体面。'] },
-  drawDecline: { _: ['行，那继续。', '好吧，我陪你下完。', '不干就不干，我还没输。'], pout: ['哼，那继续。'], smile: ['好，继续下。'] },
+  drawAsk: { _: ['这局有点胶着。要不要算和，再陪我下一盘？', '我们谁也没甩开谁呢。你愿意和棋吗？', '我想提个和。你还想继续的话，我也陪你。'], thinking: ['让我看看……嗯，和棋也许不错。你觉得呢？'], smug: ['哼哼，这盘算我们旗鼓相当？要不要和棋，再较量一局？'] },
+  drawDecline: { _: ['好呀，那就继续。我陪你把这盘下完。', '还想试试别的走法呀？好，我认真接着下。', '嗯，不和啦。下一步我也会看仔细的。'], pout: ['哼，那就继续。我可还留着小计划呢。'], smile: ['好呀，我们接着下。我也想看看后面会怎样。'] },
   poke: {
     _: ['呀，怎么突然戳我。我有在陪你呀。', '欸？我在呢。你是不是想让我看看你？', '会痒啦。好啦，我看到你了。', '再戳要收费了哦……一盘棋就好。'],
     love: ['你、你突然靠过来，我会害羞的。', '好啦，知道你在。我也在呀。', '再陪你待一会儿。就一会儿哦。'],
@@ -149,7 +149,7 @@ const EN = {
   win: ['I won! Thank you for the game.', 'This one is mine. May I be a little pleased?'], lose: ['You won. Well played!', 'A little disappointed... but I would love another game.'], draw: ['A draw. I enjoyed playing with you.', 'We both held on. Another game?'], rematch: ['Yes! Let us play again.'],
   promotion: ['Your pawn became a {promotion}!'], herPromotion: ['My pawn became a {promotion}!'], castle: ['You castled. A little shelter for your king.'], herCastle: ['I castled. My king has a little shelter now.'],
   enPassant: ['En passant! You remembered that rule.'], herEnPassant: ['I take that pawn en passant. Your turn!'], queenCapture: ['Ah, my queen! I need to be careful now.'], herQueenCapture: ['I took your queen. Let us keep playing carefully.'],
-  drawOffer: ['A draw offer? Let me look at the position.'], drawRefuse: ['I would like to play on a little longer.', 'Not yet. I still have a little plan.'], drawAsk: ['This is quite closed. Shall we call it a draw?', 'It is getting late. Draw?', 'I think we are evenly matched. Draw?'], drawDecline: ['Fine, we play on.', 'Okay, let us finish this.', 'No draw, then. I am not losing yet.'], poke: ['Ah! That tickles.', 'I am here. Did you want my attention?', 'One more poke costs one more game!'],
+  drawOffer: ['A draw offer? Let me look at the position.'], drawRefuse: ['I would like to play on a little longer.', 'Not yet. I still have a little plan.'], drawAsk: ['We seem quite evenly matched. Would you like a draw?', 'Shall we draw this one and play another?', 'A draw? I am happy to keep playing if you prefer.'], drawDecline: ['Of course. Let us keep playing together.', 'You have more ideas? I would like to see them!', 'Then we play on. I still have a little plan.'], poke: ['Ah! That tickles.', 'I am here. Did you want my attention?', 'One more poke costs one more game!'],
   firstCapture: ['You took the first piece, my {captured}!'], herFirstCapture: ['I took the first piece, your {captured}!'], firstCheck: ['Your first check! Let me think carefully.'], herFirstCheck: ['My first check! Take your time.'], queenTrade: ['Both queens have left the board. We play on.'],
   underpromotion: ['You chose a {promotion}! An interesting choice.'], herUnderpromotion: ['I chose a {promotion}. A little change of plan.'], comeback: ['You turned the position around. Nicely fought!'], herComeback: ['I managed to turn things around. I need to stay focused.'],
   blunderStreak: ['A few things slipped by. Want to rest your eyes?'], longGameSpecial: ['Fifty full moves together! Remember to have some water.'], lowMaterialSpecial: ['The endgame is here. Let us play it carefully.'], threefold: ['The same position three times. A draw by repetition.'], fiftyMove: ['Fifty moves without a capture or pawn move. A draw.'],
@@ -217,13 +217,17 @@ export class Banter {
   }
   pickDetailed(event, ctx = {}, mood = 'calm', remember = true) {
     const table = this.tableFor(event, ctx);
-    // Use every mood-specific pool, not only the currently guessed mood.
-    // The selected line then decides the portrait mood, so more of the
-    // corpus is reachable while line and expression still agree.
-    const entries = Array.isArray(table) ? [[null, table]] : Object.entries(table);
+    // Pick a contextually valid mood first, then its lines plus neutral lines.
+    // Expressions are not permission to invent facts about the board.
+    const entries = Array.isArray(table) ? [[null, table]] : [[mood, table[mood] || []], ['_', table._ || []]];
     const all = [];
     for (const [lineMood, lines] of entries) {
       for (const raw of lines) {
+        if (event === 'poke') {
+          if (lineMood === 'panic' && !ctx.herInCheck) continue;
+          if (lineMood === 'annoyed' && !ctx.thinking) continue;
+          if (raw.includes('算到哪') && !ctx.thinking) continue;
+        }
         if (raw.includes('{move}') && !ctx.move) continue;
         if (raw.includes('{captured}') && !ctx.capturedKey) continue;
         const text = fill(raw, ctx, this.locale);
@@ -250,22 +254,7 @@ export class Banter {
     return best;
   }
   pick(event, ctx = {}, mood = 'calm', remember = true) {
-    const pool = [...new Set(this.pool(event, mood, ctx)
-      .filter((line) => !line.includes('{move}') || ctx.move)
-      .filter((line) => !line.includes('{captured}') || ctx.capturedKey)
-      .map((line) => fill(line, ctx, this.locale)))];
-    if (!pool.length) pool.push(this.locale === 'en' ? 'Let me look at the board.' : '唔，让我看看棋盘。');
-    const fresh = pool.filter((line) => !this.recent.includes(line));
-    const oldest = Math.min(...pool.map((line) => this.recent.lastIndexOf(line)));
-    const candidates = fresh.length ? fresh : pool.filter((line) => this.recent.lastIndexOf(line) === oldest);
-    let best = candidates[0], bestScore = Infinity;
-    for (const line of candidates) {
-      let score = this.random() * 0.8;
-      for (const old of this.recent.slice(-8)) score += similarity(line, old);
-      if (score < bestScore) { bestScore = score; best = line; }
-    }
-    if (remember) this.remember(best, event);
-    return best;
+    return this.pickDetailed(event, ctx, mood, remember).text;
   }
   remember(line, event) {
     this.recent.push(line);

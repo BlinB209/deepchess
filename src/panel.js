@@ -5,11 +5,13 @@
  * pixel UI. The Host half is intentionally empty.
  */
 
-import { SpeechDirector, acceptsDraw, classifyDialogueMove, describeQuality, detectOpening, estimateMoveLoss, selectSpecial, shouldOfferDraw } from './dialogue.js';
+import { SpeechDirector, acceptsDraw, classifyDialogueMove, describeQuality, detectOpening, selectSpecial, shouldOfferDraw } from './dialogue.js';
 import { Banter, MOOD_LABEL, chooseMood, moveContext } from './persona.js';
+import { SearchClient } from './search-client.js';
+import { Modal } from './modal.js';
 
 const PIECE_KEY = ['', 'p', 'n', 'b', 'r', 'q', 'k'];
-const BUILD_VERSION = '0.7.0';
+const BUILD_VERSION = '0.7.1';
 const SAVE_KEY = 'deepchess.save.v1';
 const SETTINGS_KEY = 'deepchess.settings.v2';
 const STATS_KEY = 'deepchess.stats.v1';
@@ -287,6 +289,7 @@ export function DeepChessPanel(props) {
   const [speech, setSpeech] = React.useState('');
   const [speechKey, setSpeechKey] = React.useState(0);
   const [thinking, setThinking] = React.useState(false);
+  const [searchError, setSearchError] = React.useState(false);
   const [selected, setSelected] = React.useState(null);
   const [pendingPromo, setPendingPromo] = React.useState(null);
   const [menu, setMenu] = React.useState(null);
@@ -301,6 +304,12 @@ export function DeepChessPanel(props) {
   const boardRef = React.useRef(null);
   const animTimer = React.useRef(null);
   const drawTimer = React.useRef(null);
+  const searchRef = React.useRef(null);
+  if (!searchRef.current) searchRef.current = new SearchClient();
+  const settingsRef = React.useRef(settings);
+  settingsRef.current = settings;
+  const uiRef = React.useRef(null);
+  uiRef.current = { menu, confirm, pendingPromo, incomingDraw, drawPending };
 
   const banterRef = React.useRef(null);
   if (!banterRef.current) banterRef.current = new Banter(locale);
@@ -318,11 +327,10 @@ export function DeepChessPanel(props) {
   const lastActivityRef = React.useRef(Date.now());
   const idleSaidRef = React.useRef(false);
   const speechDirectorRef = React.useRef(null);
-  const openingSaidRef = React.useRef('');
   const drawOfferedRef = React.useRef(false);
-  const lowSaidRef = React.useRef(false);
-  const longSaidRef = React.useRef(false);
-  if (!speechDirectorRef.current) speechDirectorRef.current = new SpeechDirector(showSpeech);
+  const showSpeechRef = React.useRef(null);
+  showSpeechRef.current = showSpeech;
+  if (!speechDirectorRef.current) speechDirectorRef.current = new SpeechDirector((line) => showSpeechRef.current(line));
 
   const playerColor = gameColor;
   const herColor = playerColor === 'white' ? 'black' : 'white';
@@ -338,6 +346,7 @@ export function DeepChessPanel(props) {
   }, [locale]);
 
   React.useEffect(() => () => {
+    searchRef.current.cancel();
     speechDirectorRef.current.reset();
     clearTimeout(drawTimer.current);
     clearTimeout(toastTimer.current);
@@ -355,14 +364,12 @@ export function DeepChessPanel(props) {
     if (event !== 'playerQuiet' && event !== 'herQuiet') return false;
     if (game.history.length < 4 || game.history.length > 14) return false;
     const opening = detectOpening(game.history);
-    if (!opening || opening.generic || openingSaidRef.current === opening.key) return false;
-    openingSaidRef.current = opening.key;
-    say('opening', {
+    if (!opening || opening.generic) return false;
+    return saySpecial(`opening:${opening.key}`, {
       ...ctx,
       openingKey: opening.key,
       opening: locale === 'en' ? opening.en : opening.zh,
-    }, 'thinking', true);
-    return true;
+    }, 'thinking', 'opening');
   }
 
   function maybeStateComment() {
@@ -372,29 +379,26 @@ export function DeepChessPanel(props) {
       if ((sq & 0x88) !== 0 || !game.position.at(sq)) continue;
       if (typeOf(game.position.at(sq)) !== 6) pieces += 1;
     }
-    if (!lowSaidRef.current && pieces <= 6) {
-      lowSaidRef.current = true;
-      say('lowMaterial', {}, 'determined', true);
-    } else if (!longSaidRef.current && game.history.length >= 40) {
-      longSaidRef.current = true;
-      say('longGame', {}, 'tired', true);
+    if (pieces <= 6) {
+      saySpecial('lowMaterialSpecial', {}, 'determined');
+    } else if (game.history.length >= 100) {
+      saySpecial('longGameSpecial', {}, 'tired');
     }
   }
 
-  function saySpecial(key, ctx, mood) {
+  function saySpecial(key, ctx, mood, event = key) {
     if (specialRef.current.has(key)) return false;
-    const accepted = say(key, ctx, mood, true);
-    if (accepted) specialRef.current.add(key);
-    return accepted;
+    if (speechDirectorRef.current.hasPending(key)) return true;
+    return say(event, ctx, mood, true, key);
   }
 
   function poke() {
-    if (pendingPromo || menu || drawPending) return;
+    if (pendingPromo || menu || confirm || incomingDraw || drawPending) return;
     let nextMood = mood;
     if (game.inCheck() && game.turn !== playerTurn && !over) nextMood = 'panic';
     else if (thinking) nextMood = 'annoyed';
     else if (!over) nextMood = ['love', 'embarrassed', 'pout', 'laugh'][Math.floor(Math.random() * 4)];
-    say('poke', {}, nextMood, true);
+    say('poke', { herInCheck: game.inCheck() && game.turn !== playerTurn && !over, thinking, over }, nextMood, true);
     lastActivityRef.current = Date.now();
     idleSaidRef.current = false;
   }
@@ -421,7 +425,7 @@ export function DeepChessPanel(props) {
     const place = (sq) => {
       const file = sq & 15;
       const rank = sq >> 4;
-      return settings.flip ? [7 - file, rank] : [file, 7 - rank];
+      return settingsRef.current.flip ? [7 - file, rank] : [file, 7 - rank];
     };
     const [fx, fy] = place(move.from);
     const [tx, ty] = place(move.to);
@@ -463,7 +467,7 @@ export function DeepChessPanel(props) {
   }
 
   function playSound(kind) {
-    if (!settings.sound) return;
+    if (!settingsRef.current.sound) return;
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (!Ctx) return;
@@ -506,6 +510,10 @@ export function DeepChessPanel(props) {
   }
 
   function showSpeech(line) {
+    if (line.onceKey) {
+      specialRef.current.add(line.onceKey);
+      persist();
+    }
     banterRef.current.remember(line.text, line.event);
     rememberMood(line.mood);
     setSpeech(line.text);
@@ -514,9 +522,9 @@ export function DeepChessPanel(props) {
     if (line.mood === 'angry' || line.mood === 'panic') triggerShake();
   }
 
-  function say(event, ctx = {}, nextMood, force = false) {
+  function say(event, ctx = {}, nextMood, force = false, onceKey = null) {
     const ambient = ['idle', 'playerThinkLong', 'herThink'].includes(event);
-    const probability = settings.banter === 'quiet' ? 0.08 : settings.banter === 'chatty' ? 0.9 : event === 'playerQuiet' ? 0.55 : 0.72;
+    const probability = settingsRef.current.banter === 'quiet' ? 0.08 : settingsRef.current.banter === 'chatty' ? 0.9 : event === 'playerQuiet' ? 0.55 : 0.72;
     if (!force && !KEY_EVENTS.has(event) && Math.random() > probability) return false;
     const flavour = nextMood || chooseMood({
       status: manual || game.status(),
@@ -531,7 +539,7 @@ export function DeepChessPanel(props) {
     const picked = banterRef.current.pickDetailed(event, ctx, flavour, false);
     const lineMood = nextMood || picked.mood || flavour;
     return speechDirectorRef.current.speak({
-      event, text: picked.text, mood: lineMood,
+      event, text: picked.text, mood: lineMood, onceKey,
       priority: ambient ? 0 : ['win', 'lose', 'draw', 'resign', 'checkmateWin', 'checkmateLose', 'threefold', 'fiftyMove'].includes(event) ? 3 : force || KEY_EVENTS.has(event) ? 2 : 1,
     });
   }
@@ -539,6 +547,14 @@ export function DeepChessPanel(props) {
   function finish(status, source) {
     if (settledRef.current) return;
     settledRef.current = true;
+    searchRef.current.cancel();
+    speechDirectorRef.current.reset();
+    setConfirm(null);
+    setMenu(null);
+    setPendingPromo(null);
+    setSelected(null);
+    setIncomingDraw(false);
+    setSearchError(false);
     clearTimeout(drawTimer.current);
     setDrawPending(false);
     const draw = !status.winner;
@@ -569,13 +585,26 @@ export function DeepChessPanel(props) {
     playSound(draw ? 'move' : playerWon ? 'lose' : 'win');
   }
 
-  function afterPlayerMove(move, result, before) {
+  function reactToMove(move, result, before, loss, byPlayer) {
     const after = evaluateWhite(game.position);
-    const loss = result.status.state === 'playing' ? estimateMoveLoss(game.lastMove.before, move) : 0;
-    const gain = (after - before) * (playerColor === 'white' ? 1 : -1);
-    const event = classifyDialogueMove(move, result.san, loss, true, gain);
-    const verdict = describeQuality(loss, gain, locale);
-    const ctx = moveContext(move, result.san, game.history.length, { byPlayer: true, loss, gain, verdict });
+    const gain = (after - before) * ((playerColor === 'white') === byPlayer ? 1 : -1);
+    const event = classifyDialogueMove(move, result.san, loss, byPlayer, gain);
+    const verdict = describeQuality(loss, move.captured || move.promotion ? 0 : gain, locale);
+    const ctx = moveContext(move, result.san, game.history.length, { byPlayer, loss, gain, verdict });
+    if (byPlayer) {
+      if (loss >= 180) factsRef.current.blunders += 1;
+      factsRef.current.blunderStreak = loss >= 180 ? factsRef.current.blunderStreak + 1 : 0;
+    }
+    const special = event.endsWith('Blunder') ? null : selectSpecial(game, move, result.san, before, after, playerColor, factsRef.current, specialRef.current);
+    const fullCtx = { ...ctx, blunders: factsRef.current.blunders, undos: factsRef.current.undos };
+    if (!special || !saySpecial(special, fullCtx)) {
+      if (!maybeOpening(fullCtx, event)) say(event, fullCtx);
+    }
+    maybeStateComment();
+    persist();
+  }
+
+  function afterPlayerMove(move, result, before) {
     speechDirectorRef.current.beginTurn();
     lastActivityRef.current = Date.now();
     idleSaidRef.current = false;
@@ -587,19 +616,21 @@ export function DeepChessPanel(props) {
       return;
     }
     setSelected(null);
-    if (loss >= 180) factsRef.current.blunders += 1;
-    factsRef.current.blunderStreak = loss >= 180 ? factsRef.current.blunderStreak + 1 : 0;
-    const special = event === 'playerBlunder' ? null : selectSpecial(game, move, result.san, before, after, playerColor, factsRef.current, specialRef.current);
-    if (!special || !saySpecial(special, { ...ctx, blunders: factsRef.current.blunders, undos: factsRef.current.undos })) {
-      const fullCtx = { ...ctx, blunders: factsRef.current.blunders, undos: factsRef.current.undos };
-      if (!maybeOpening(fullCtx, event)) say(event, fullCtx);
-    }
-    maybeStateComment();
     persist();
+    const fen = game.fen();
+    searchRef.current.request('analyze', { fen: game.lastMove.before, move }).then(({ loss }) => {
+      if (bootRef.current.game !== game || game.fen() !== fen || settledRef.current) return;
+      reactToMove(move, result, before, loss, true);
+    }).catch((error) => {
+      if (error.name !== 'AbortError' && bootRef.current.game === game && game.fen() === fen && !settledRef.current) {
+        // Preserve event feedback even if optional analysis is unavailable.
+        reactToMove(move, result, before, 0, true);
+      }
+    });
   }
 
   function playMove(from, to, promotion = 0) {
-    if (over || thinking || drawPending || game.turn !== playerTurn) return;
+    if (over || settledRef.current || thinking || drawPending || incomingDraw || confirm || menu || (pendingPromo && !promotion) || game.turn !== playerTurn) return;
     const before = evaluateWhite(game.position);
     const result = game.playUci(from, to, promotion);
     if (!result) return;
@@ -607,7 +638,7 @@ export function DeepChessPanel(props) {
   }
 
   function onSquare(sq) {
-    if (over || thinking || drawPending || game.turn !== playerTurn) return;
+    if (over || settledRef.current || thinking || drawPending || incomingDraw || confirm || menu || pendingPromo || game.turn !== playerTurn) return;
     const piece = game.position.at(sq);
     const own = piece !== 0 && colorOf(piece) === playerTurn;
     if (selected == null) {
@@ -638,7 +669,8 @@ export function DeepChessPanel(props) {
   }
 
   function undo() {
-    if (thinking || over || drawPending) return;
+    if (thinking || over || drawPending || incomingDraw || pendingPromo || confirm || menu) return;
+    searchRef.current.cancel();
     if (!game.history.length) {
       showToast(t('toast.noUndo'));
       return;
@@ -659,6 +691,10 @@ export function DeepChessPanel(props) {
 
   function startNew() {
     const rematch = over;
+    searchRef.current.cancel();
+    setSearchError(false);
+    setConfirm(null);
+    setMenu(null);
     if (drawTimer.current) clearTimeout(drawTimer.current);
     setDrawPending(false);
     bootRef.current.game = new ChessGame();
@@ -666,11 +702,8 @@ export function DeepChessPanel(props) {
     settledRef.current = false;
     factsRef.current = { blunders: 0, blunderStreak: 0, undos: 0 };
     specialRef.current = new Set();
-    openingSaidRef.current = '';
     drawOfferedRef.current = false;
     setIncomingDraw(false);
-    lowSaidRef.current = false;
-    longSaidRef.current = false;
     speechDirectorRef.current.reset();
     setManual(null);
     setGameColor(settings.playerColor);
@@ -733,7 +766,7 @@ export function DeepChessPanel(props) {
   }
 
   function maybeOfferDraw() {
-    if (over || incomingDraw || drawPending || menu || confirm || pendingPromo || drawOfferedRef.current) return;
+    if (settledRef.current || Object.values(uiRef.current).some(Boolean) || drawOfferedRef.current) return;
     if (game.turn !== playerTurn || game.inCheck()) return;
     if (!shouldOfferDraw(game.position, evaluateWhite(game.position), playerColor, game.history.length)) return;
     drawOfferedRef.current = true;
@@ -767,21 +800,22 @@ export function DeepChessPanel(props) {
     if (aiRef.current) return;
     aiRef.current = true;
     setThinking(true);
+    setSearchError(false);
+    let active = true;
+    const fen = game.fen();
     if (Math.random() < 0.24) say('herThink', {}, 'thinking');
-    const timer = setTimeout(() => {
-      if (!aiRef.current) return;
-      const searchStarted = performance.now();
+    const timer = setTimeout(async () => {
+      if (!active || !aiRef.current) return;
       try {
         const before = evaluateWhite(game.position);
-        const pick = chooseMove(game.position, settings.difficulty);
-        if (!pick || !pick.move) {
-          setThinking(false);
-          aiRef.current = false;
-          return;
-        }
-        const move = pick.move;
-        const result = game.play(move);
-        const after = evaluateWhite(game.position);
+        const pick = await searchRef.current.request('choose', {
+          fen, difficulty: settings.difficulty, ucis: game.history.map((entry) => entry.uci),
+        });
+        if (!active || !aiRef.current || settledRef.current || bootRef.current.game !== game || game.fen() !== fen) return;
+        if (!pick?.move) throw new Error('No move from search');
+        const result = game.playUci(pick.move.from, pick.move.to, pick.move.promotion);
+        if (!result) throw new Error('Invalid move from search');
+        const move = game.lastMove.move;
         lastActivityRef.current = Date.now();
         idleSaidRef.current = false;
         animateMove(move, Boolean(move.captured), /[+#]/.test(result.san));
@@ -793,29 +827,24 @@ export function DeepChessPanel(props) {
           finish(result.status, 'engine');
           return;
         }
-        const loss = estimateMoveLoss(game.lastMove.before, move);
-        const gain = (after - before) * (playerColor === 'white' ? -1 : 1);
-        const event = classifyDialogueMove(move, result.san, loss, false, gain);
-        const verdict = describeQuality(loss, gain, locale);
-        const ctx = moveContext(move, result.san, game.history.length, { byPlayer: false, loss, gain, verdict });
-        const special = event === 'herBlunder' ? null : selectSpecial(game, move, result.san, before, after, playerColor, factsRef.current, specialRef.current);
-        speechDirectorRef.current.deferFor(performance.now() - searchStarted);
-        if (!special || !saySpecial(special, ctx)) {
-          if (!maybeOpening(ctx, event)) say(event, ctx);
-        }
-        maybeStateComment();
+        reactToMove(move, result, before, Number.isFinite(pick.loss) ? pick.loss : 0, false);
         maybeOfferDraw();
         persist();
       } catch (error) {
+        if (!active || error.name === 'AbortError') return;
+        searchRef.current.cancel();
         setThinking(false);
         aiRef.current = false;
+        setSearchError(true);
       }
     }, 280);
     return () => {
       clearTimeout(timer);
+      active = false;
       aiRef.current = false;
+      searchRef.current.cancel();
     };
-  }, [tick, over, playerColor, settings.difficulty]);
+  }, [tick, over, playerColor, settings.difficulty, locale]);
 
   React.useEffect(() => {
     writeJSON(SETTINGS_KEY, settings);
@@ -828,7 +857,7 @@ export function DeepChessPanel(props) {
 
   React.useEffect(() => {
     const timer = setInterval(() => {
-      if (over || thinking || menu || confirm || pendingPromo || drawPending || slowSaidRef.current || settings.banter === 'quiet') return;
+      if (over || thinking || menu || confirm || pendingPromo || incomingDraw || drawPending || slowSaidRef.current || settings.banter === 'quiet') return;
       if (typeof document !== 'undefined' && document.hidden) return;
       if (game.turn !== playerTurn) return;
       if (Date.now() - turnStartRef.current < 45000) return;
@@ -836,11 +865,11 @@ export function DeepChessPanel(props) {
       say('playerThinkLong');
     }, 5000);
     return () => clearInterval(timer);
-  }, [over, thinking, menu, confirm, pendingPromo, drawPending, gameColor, tick, settings.banter]);
+  }, [over, thinking, menu, confirm, pendingPromo, incomingDraw, drawPending, gameColor, tick, settings.banter]);
 
   React.useEffect(() => {
     const timer = setInterval(() => {
-      if (over || thinking || menu || confirm || pendingPromo || drawPending || idleSaidRef.current || settings.banter === 'quiet') return;
+      if (over || thinking || menu || confirm || pendingPromo || incomingDraw || drawPending || idleSaidRef.current || settings.banter === 'quiet') return;
       if (typeof document !== 'undefined' && document.hidden) return;
       if (game.turn !== playerTurn) return;
       if (Date.now() - lastActivityRef.current < 75000) return;
@@ -848,7 +877,7 @@ export function DeepChessPanel(props) {
       say('idle');
     }, 10000);
     return () => clearInterval(timer);
-  }, [over, thinking, menu, confirm, pendingPromo, drawPending, gameColor, tick, settings.banter]);
+  }, [over, thinking, menu, confirm, pendingPromo, incomingDraw, drawPending, gameColor, tick, settings.banter]);
 
   const moodLabel = MOOD_LABEL[locale][mood] || mood;
   const movePairs = [];
@@ -906,6 +935,8 @@ export function DeepChessPanel(props) {
           button: t('btn.offerDraw'), action: offerDraw,
         }
         : null;
+
+  const modal = incomingDraw ? 'incoming' : pendingPromo ? 'promotion' : confirmMeta ? 'confirm' : menu ? 'menu' : over ? 'result' : null;
 
   return React.createElement('div', { className: 'dc-root' },
     React.createElement('div', { className: 'dc-head' },
@@ -967,7 +998,7 @@ export function DeepChessPanel(props) {
         onSquare,
         settings,
         hints: settings.hints,
-        disabled: over || thinking || drawPending || game.turn !== playerTurn,
+        disabled: over || thinking || drawPending || Boolean(modal) || game.turn !== playerTurn,
         playerColor,
         checkSquare,
         lastMove,
@@ -975,6 +1006,9 @@ export function DeepChessPanel(props) {
         anim,
         boardShake,
       })),
+    searchError ? React.createElement('div', { className: 'dc-search-error', role: 'alert' },
+      React.createElement('span', null, t('search.failed')),
+      React.createElement('button', { className: 'dc-btn', type: 'button', onClick: () => bump() }, t('search.retry'))) : null,
     React.createElement('div', { className: 'dc-status' },
       React.createElement('div', { className: 'dc-turn' },
         React.createElement('span', { className: 'dc-turn-dot' }),
@@ -1002,8 +1036,8 @@ export function DeepChessPanel(props) {
         .replace('{wins}', stats.wins)
         .replace('{losses}', stats.losses)
         .replace('{draws}', stats.draws))),
-    confirmMeta
-      ? React.createElement('div', { className: 'dc-overlay', style: { zIndex: 35 } },
+    modal === 'confirm'
+      ? React.createElement(Modal, { key: 'confirm', className: 'dc-overlay', style: { zIndex: 35 }, label: confirmMeta.title, onClose: () => setConfirm(null) },
         React.createElement('div', { className: 'dc-sheet-body' },
           React.createElement('div', { className: 'dc-confirm-wrap' },
             React.createElement('div', { className: `dc-confirm-card ${confirmMeta.tone}` },
@@ -1020,8 +1054,8 @@ export function DeepChessPanel(props) {
             onClick: confirmMeta.action,
           }, confirmMeta.button)))
       : null,
-    incomingDraw
-      ? React.createElement('div', { className: 'dc-overlay', style: { zIndex: 36 } },
+    modal === 'incoming'
+      ? React.createElement(Modal, { key: 'incoming', className: 'dc-overlay', style: { zIndex: 36 }, label: t('draw.incomingTitle'), onClose: declineIncomingDraw },
         React.createElement('div', { className: 'dc-sheet-body' },
           React.createElement('div', { className: 'dc-confirm-wrap' },
             React.createElement('div', { className: 'dc-confirm-card draw' },
@@ -1034,8 +1068,8 @@ export function DeepChessPanel(props) {
           React.createElement('button', { type: 'button', className: 'dc-btn', onClick: declineIncomingDraw }, t('btn.declineDraw')),
           React.createElement('button', { type: 'button', className: 'dc-btn gold', onClick: acceptIncomingDraw }, t('btn.acceptDraw'))))
       : null,
-    over && !menu
-      ? React.createElement('div', { className: 'dc-result' },
+    modal === 'result'
+      ? React.createElement(Modal, { key: 'result', className: 'dc-result', label: t('result.kicker') },
         React.createElement('div', { className: 'dc-result-sheet' },
           React.createElement('div', { className: 'dc-result-kicker' }, t('result.kicker')),
           React.createElement('div', { className: 'dc-result-title' }, resultTitle),
@@ -1060,7 +1094,7 @@ export function DeepChessPanel(props) {
                   key: side,
                   type: 'button',
                   className: settings.playerColor === side ? 'on' : '',
-                  onClick: () => setSettings((value) => ({ ...value, playerColor: side })),
+                  onClick: () => setSettings((value) => ({ ...value, playerColor: side, flip: side === 'black' })),
                 }, t(`side.${side}`))))),
             React.createElement('div', { className: 'dc-result-row' },
               React.createElement('span', { className: 'dc-result-row-label' }, t('set.sound')),
@@ -1082,8 +1116,8 @@ export function DeepChessPanel(props) {
             React.createElement('button', { type: 'button', className: 'dc-btn gold', onClick: startNew }, t('btn.rematch')),
             React.createElement('button', { type: 'button', className: 'dc-btn', onClick: () => setMenu('moves') }, t('btn.review')))))
       : null,
-    pendingPromo
-      ? React.createElement('div', { className: 'dc-promo' },
+    modal === 'promotion'
+      ? React.createElement(Modal, { key: 'promotion', className: 'dc-promo', label: t('promo.title'), onClose: () => { setPendingPromo(null); setSelected(null); } },
         React.createElement('div', { className: 'dc-promo-card' },
           React.createElement('div', { className: 'dc-promo-title' }, t('promo.title')),
           React.createElement('div', { className: 'dc-promo-grid' },
@@ -1095,8 +1129,8 @@ export function DeepChessPanel(props) {
             React.createElement('img', { src: ASSETS.pieces[`${gameColor === 'white' ? 'w' : 'b'}-${key}`], alt: '' }),
             React.createElement('span', null, t(`promo.${key}`)))))))
       : null,
-    menu === 'settings'
-      ? React.createElement('div', { className: 'dc-overlay' },
+    modal === 'menu' && menu === 'settings'
+      ? React.createElement(Modal, { key: 'settings', className: 'dc-overlay', label: t('set.title'), onClose: () => setMenu(null) },
         React.createElement('div', { className: 'dc-sheet-head' },
           React.createElement('div', { className: 'dc-sheet-title' }, t('set.title')),
           React.createElement('button', { type: 'button', className: 'dc-icon-btn', style: { marginLeft: 'auto' }, onClick: () => setMenu(null) }, '×')),
@@ -1163,8 +1197,8 @@ export function DeepChessPanel(props) {
               onClick: () => { const empty = { wins: 0, losses: 0, draws: 0, streak: 0, best: 0 }; setStats(empty); writeJSON(STATS_KEY, empty); },
             }, t('btn.reset')))))
       : null,
-    menu === 'moves'
-      ? React.createElement('div', { className: 'dc-overlay' },
+    modal === 'menu' && menu === 'moves'
+      ? React.createElement(Modal, { key: 'moves', className: 'dc-overlay', label: t('moves.title'), onClose: () => setMenu(null) },
         React.createElement('div', { className: 'dc-sheet-head' },
           React.createElement('div', { className: 'dc-sheet-title' }, t('moves.title')),
           React.createElement('button', { type: 'button', className: 'dc-icon-btn', style: { marginLeft: 'auto' }, onClick: () => setMenu(null) }, '×')),
@@ -1173,8 +1207,8 @@ export function DeepChessPanel(props) {
             ? movePairs.map((pair) => React.createElement('div', { key: pair.n, className: 'dc-hint' }, `${pair.n}. ${pair.white}  ${pair.black}`))
             : React.createElement('div', { className: 'dc-hint' }, t('moves.empty'))))
       : null,
-    menu === 'log'
-      ? React.createElement('div', { className: 'dc-log' },
+    modal === 'menu' && menu === 'log'
+      ? React.createElement(Modal, { key: 'log', className: 'dc-log', label: t('chat.title'), onClose: () => setMenu(null) },
         React.createElement('div', { className: 'dc-sheet-head' },
           React.createElement('div', { className: 'dc-sheet-title' }, t('chat.title')),
           React.createElement('button', { type: 'button', className: 'dc-icon-btn', style: { marginLeft: 'auto' }, onClick: () => setMenu(null) }, '×')),

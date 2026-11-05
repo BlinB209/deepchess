@@ -46,8 +46,10 @@ if (!existsSync(fontPath)) {
   process.exit(1);
 }
 
-const modules = ['engine.js', 'ai.js', 'persona.js', 'dialogue.js', 'i18n.js', 'styles.js', 'panel.js', 'apply.js'];
+const modules = ['engine.js', 'ai.js', 'persona.js', 'dialogue.js', 'search-client.js', 'modal.js', 'i18n.js', 'styles.js', 'panel.js', 'apply.js'];
 const body = modules.map((name) => strip(readFileSync(join(here, name), 'utf8'))).join('\n\n');
+const workerSource = ['engine.js', 'ai.js', 'dialogue.js', 'search-worker.js']
+  .map((name) => strip(readFileSync(join(here, name), 'utf8'))).join('\n\n');
 
 const assets = {
   font: dataUrl(fontPath, 'font/woff2'),
@@ -61,6 +63,7 @@ window.__ModuleLoader__.load({
   factory(require) {
     const React = require('react');
     const h = React.createElement;
+    const SEARCH_WORKER_SOURCE = ${JSON.stringify(workerSource)};
     const ASSETS = ${JSON.stringify(assets)};
 
 ${body}

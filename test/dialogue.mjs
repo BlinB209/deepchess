@@ -101,7 +101,7 @@ test('event classification distinguishes queens and respects check and promotion
   assert.equal(classifyDialogueMove(queen, 'Rxd1+', 0, false), 'herCheck');
   assert.equal(classifyDialogueMove({ promotion: 3 }, 'a8=B', 0, true), 'promotion');
   assert.equal(classifyDialogueMove({ captured: 1, flags: 1 }, 'Nxd5', 300, true), 'playerBlunder');
-  assert.equal(classifyDialogueMove({ captured: 4, flags: 1 }, 'Bxa8', 0, true, 500), 'playerGood');
+  assert.equal(classifyDialogueMove({ captured: 4, flags: 1 }, 'Bxa8', 0, true, 500), 'playerCapture');
 });
 
 test('move assessment notices a hanging queen, allows a safe capture, and preserves the game', () => {
@@ -129,8 +129,8 @@ test('quality grading separates blunders, mistakes and good moves', () => {
   assert.equal(describeQuality(700, 0, 'zh'), '大臭棋');
   assert.equal(describeQuality(300, 0, 'zh'), '臭棋');
   assert.equal(describeQuality(190, 0, 'zh'), '小失误');
-  assert.equal(describeQuality(0, 700, 'zh'), '妙棋');
-  assert.equal(describeQuality(0, 300, 'zh'), '好棋');
+  assert.equal(describeQuality(0, 700, 'zh'), '不错的棋');
+  assert.equal(describeQuality(0, 300, 'zh'), '不错的棋');
   assert.equal(describeQuality(0, 0, 'zh'), '');
   assert.equal(describeQuality(300, 0, 'en'), 'a bad move');
 });

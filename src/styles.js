@@ -89,6 +89,8 @@ body[data-theme="light"] .dc-root,
 .dc-root button{font-family:inherit;font-size:12px}
 .dc-root img{image-rendering:pixelated}
 .dc-scroll{overflow:auto;min-height:0}
+.dc-search-error{padding:6px 10px;display:flex;align-items:center;gap:8px;color:var(--dc-danger);flex:0 0 auto}
+.dc-search-error .dc-btn{padding:3px 8px;flex:0 0 auto}
 .dc-root *::-webkit-scrollbar{width:6px;height:6px}
 .dc-root *::-webkit-scrollbar-thumb{background:var(--dc-border)}
 .dc-root *::-webkit-scrollbar-track{background:var(--dc-bg-track)}

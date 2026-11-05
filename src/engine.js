@@ -439,14 +439,21 @@ export class Position {
     this.halfmove = undo.halfmove;
   }
 
-  /** Ep square only when an enemy pawn could actually capture there. */
+  /** Only a legal en passant move distinguishes otherwise identical positions. */
   epKey() {
     if (this.ep < 0) return '-';
     const us = this.turn;
     const dir = us === WHITE ? 16 : -16;
     for (const side of [-1, 1]) {
       const from = this.ep - dir + side;
-      if (onBoard(from) && this.board[from] === (PAWN | (us === BLACK ? 8 : 0))) return squareName(this.ep);
+      if (!onBoard(from) || this.board[from] !== (PAWN | (us === BLACK ? 8 : 0))) continue;
+      const capturedSq = this.ep - dir;
+      if (this.board[this.ep] || this.board[capturedSq] !== (PAWN | (us === WHITE ? 8 : 0))) continue;
+      const move = makeMove(from, this.ep, this.board[from], this.board[capturedSq], capturedSq, 0, F_EP | F_CAPTURE);
+      const undo = this.make(move);
+      const legal = !this.isAttacked(this.kings[us], us ^ 1);
+      this.unmake(undo);
+      if (legal) return squareName(this.ep);
     }
     return '-';
   }

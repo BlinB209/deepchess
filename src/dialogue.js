@@ -34,8 +34,9 @@ export function classifyDialogueMove(move, san, loss, byPlayer, gain = 0) {
   if (loss >= 180) return `${side}Blunder`;
   if (move.flags & 4) return 'castle';
   if (move.flags & 2) return 'enPassant';
+  if (move.captured) return `${side}Capture`;
   if (loss < 60 && gain > 180) return `${side}Good`;
-  return `${side}${move.captured ? 'Capture' : 'Quiet'}`;
+  return `${side}Quiet`;
 }
 
 const OPENINGS = [
@@ -47,8 +48,9 @@ const OPENINGS = [
   { key: 'scandinavian', moves: ['e4', 'd5'], zh: '斯堪的纳维亚防御', en: 'Scandinavian Defence' },
   { key: 'queensGambit', moves: ['d4', 'd5', 'c4'], zh: '后翼弃兵', en: "Queen's Gambit" },
   { key: 'london', moves: ['d4', 'd5', 'Bf4'], zh: '伦敦体系', en: 'London System' },
-  { key: 'kingsIndian', moves: ['d4', 'Nf6', 'c4', 'g6'], zh: '王翼印度防御', en: "King's Indian Defence" },
-  { key: 'nimzoIndian', moves: ['d4', 'Nf6', 'c4', 'e6'], zh: '尼姆佐维奇防御', en: 'Nimzo-Indian Defence' },
+  { key: 'kingsIndian', moves: ['d4', 'Nf6', 'c4', 'g6', 'Nc3', 'Bg7', 'e4', 'd6'], zh: '王翼印度防御', en: "King's Indian Defence" },
+  { key: 'nimzoIndian', moves: ['d4', 'Nf6', 'c4', 'e6', 'Nc3', 'Bb4'], zh: '尼姆佐维奇防御', en: 'Nimzo-Indian Defence' },
+  { key: 'indianGame', moves: ['d4', 'Nf6'], zh: '印度防御体系', en: 'Indian Game', generic: true },
   { key: 'english', moves: ['c4'], zh: '英国式开局', en: 'English Opening' },
   { key: 'reti', moves: ['Nf3'], zh: '列蒂开局', en: 'Réti Opening' },
   { key: 'openGame', moves: ['e4', 'e5'], zh: '开放局', en: 'Open Game', generic: true },
@@ -71,8 +73,7 @@ export function describeQuality(loss, gain, locale = 'zh') {
   if (loss >= 500) return en ? 'a blunder' : '大臭棋';
   if (loss >= 250) return en ? 'a bad move' : '臭棋';
   if (loss >= 180) return en ? 'a small mistake' : '小失误';
-  if (gain >= 500) return en ? 'a brilliant move' : '妙棋';
-  if (gain >= 250) return en ? 'a good move' : '好棋';
+  // A shallow estimate cannot establish a brilliant move. Keep praise modest.
   if (gain >= 180) return en ? 'a nice move' : '不错的棋';
   return '';
 }
@@ -109,14 +110,17 @@ export function selectSpecial(game, move, san, before, after, playerColor, facts
 
 /** Closed-ish position: many pawns, few open files and at least two locked files. */
 export function isClosedPosition(position) {
-  const files = Array.from({ length: 8 }, () => ({ w: 0, b: 0 }));
+  const files = Array.from({ length: 8 }, () => ({ w: 0, b: 0, locked: false }));
   let pawns = 0;
   for (let sq = 0; sq < 128; sq += 1) {
     if (sq & 0x88) continue;
     const piece = position.board[sq];
     if (!piece || typeOf(piece) !== PAWN) continue;
     const file = sq & 15;
-    if ((piece & 8) === 0) files[file].w += 1;
+    if ((piece & 8) === 0) {
+      files[file].w += 1;
+      if (!((sq + 16) & 0x88) && position.board[sq + 16] === (PAWN | 8)) files[file].locked = true;
+    }
     else files[file].b += 1;
     pawns += 1;
   }
@@ -124,7 +128,7 @@ export function isClosedPosition(position) {
   let blockedFiles = 0;
   for (const file of files) {
     if (!file.w && !file.b) openFiles += 1;
-    if (file.w && file.b) blockedFiles += 1;
+    if (file.locked) blockedFiles += 1;
   }
   return pawns >= 10 && openFiles <= 3 && blockedFiles >= 2;
 }
@@ -183,6 +187,10 @@ export class SpeechDirector {
     this.queue = [];
     this.until = 0;
     this.priority = -1;
+  }
+
+  hasPending(key) {
+    return this.queue.some((line) => line.onceKey === key);
   }
 
   deferFor(blockedMs) {

@@ -76,9 +76,24 @@ export function panelHarness(saved = {}, random = 0.5) {
     requestAnimationFrame: (fn) => clock.schedule(fn, 16),
     localStorage: { getItem: (k) => store.get(k) || null, setItem: (k, v) => store.set(k, v) },
     document: { hidden: false }, window: {}, ASSETS: { pieces: {}, portraits: {} },
+    SEARCH_WORKER_SOURCE: 'test worker', Blob: class {},
+    URL: { createObjectURL: () => 'blob:test', revokeObjectURL() {} },
   });
-  const source = ['engine.js', 'ai.js', 'persona.js', 'dialogue.js', 'panel.js'].map((file) => readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8').replace(/^import[^\n]*\n/gm, '').replace(/^export\s+/gm, '')).join('\n');
-  vm.runInContext(source + '\nglobalThis.components = { DeepChessPanel, Typewriter };', ctx);
+  const source = ['engine.js', 'ai.js', 'persona.js', 'dialogue.js', 'search-worker.js', 'search-client.js', 'modal.js', 'panel.js'].map((file) => readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8').replace(/^import[^\n]*\n/gm, '').replace(/^export\s+/gm, '')).join('\n');
+  vm.runInContext(source + '\nglobalThis.components = { DeepChessPanel, Typewriter, Modal };', ctx);
+  ctx.Worker = class {
+    constructor() { this.timers = []; }
+    postMessage(message) {
+      this.timers.push(clock.schedule(() => {
+        ctx.searchMessage = message;
+        try {
+          const result = vm.runInContext('processSearchRequest(searchMessage)', ctx);
+          this.onmessage?.({ data: { id: message.id, result } });
+        } catch (error) { this.onmessage?.({ data: { id: message.id, error: error.message } }); }
+      }, 0));
+    }
+    terminate() { for (const timer of this.timers) clock.cancel(timer); }
+  };
   // Deterministic legal reply keeps lifecycle tests independent of search strength.
   vm.runInContext('chooseMove = (position) => ({ move: position.generateLegal()[0] });', ctx);
   component = ctx.components.DeepChessPanel;
@@ -99,6 +114,17 @@ export function panelHarness(saved = {}, random = 0.5) {
     clock, ctx, store, flush, nodes,
     mount(name = 'DeepChessPanel', nextProps = props) { component = ctx.components[name]; props = nextProps; dirty = true; return flush(); },
     advance(ms) { clock.advance(ms, flush); flush(); },
+    async advanceAsync(ms) {
+      // Worker messages and promise continuations run between browser tasks.
+      const step = async (duration) => {
+        clock.advance(duration, flush);
+        for (let i = 0; i < 5; i++) { await Promise.resolve(); flush(); }
+        clock.advance(0, flush);
+        for (let i = 0; i < 5; i++) { await Promise.resolve(); flush(); }
+      };
+      for (let elapsed = 0; elapsed < ms; elapsed += 10) await step(Math.min(10, ms - elapsed));
+      if (!ms) await step(0);
+    },
     unmount() { for (const hook of hooks) hook?.cleanup?.(); },
     get tree() { return tree; },
   };

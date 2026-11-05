@@ -79,3 +79,13 @@ test('analysis lines name the opening and react to good and bad moves', () => {
   assert.match(banter.pick('herBlunder', {}, 'sad'), /臭棋|怎么会/);
   assert.match(banter.pick('herGood', {}, 'smug'), /好棋|算到/);
 });
+
+test('draw responses stay companionable and do not invent a time of day or closed position', () => {
+  for (const locale of ['zh', 'en']) for (const mood of MOODS) {
+    const b = new Banter(locale, () => 0);
+    for (let i = 0; i < 8; i++) {
+      assert.doesNotMatch(b.pickDetailed('drawAsk', {}, mood).text, /半夜|体面|getting late|quite closed/);
+      assert.doesNotMatch(b.pickDetailed('drawDecline', {}, mood).text, /不干就不干|Fine, we play on|not losing yet/);
+    }
+  }
+});

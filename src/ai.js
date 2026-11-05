@@ -265,13 +265,16 @@ function quiesce(position, alpha, beta, ctx, depth, ply) {
     return alpha;
   }
   const inCheck = position.inCheck();
+  const legal = position.generateLegal();
+  if (!legal.length) return inCheck ? -MATE + ply : 0;
+  if (position.halfmove >= 100 || position.insufficientMaterial()) return 0;
+  if (!ctx.quiesce) return evaluate(position);
   if (!inCheck) {
     const stand = evaluate(position);
     if (stand >= beta) return beta;
     if (stand > alpha) alpha = stand;
     if (depth <= 0) return alpha;
   }
-  const legal = position.generateLegal();
   const moves = inCheck ? legal : legal.filter((move) => move.captured || move.promotion);
   if (!moves.length) return inCheck ? -MATE + ply : alpha;
   const ordered = orderMoves(moves, 0, ctx.killers, ctx.history);
@@ -296,6 +299,7 @@ function negamax(position, depth, alpha, beta, ply, ctx) {
   const inCheck = position.inCheck();
   const moves = position.generateLegal();
   if (!moves.length) return inCheck ? -MATE + ply : 0;
+  if (position.halfmove >= 100 || position.insufficientMaterial()) return 0;
   const ordered = orderMoves(moves, ply, ctx.killers, ctx.history);
   let best = -INF;
   for (const move of ordered) {
@@ -332,6 +336,7 @@ export function chooseMove(position, levelId = 'l5', random = Math.random) {
     nodesCap: level.nodes,
     deadline: started + level.timeMs,
     aborted: false,
+    quiesce: level.quiesce,
     killers: new Array(16),
     history: new Int32Array(128 * 128),
   };
@@ -354,7 +359,7 @@ export function chooseMove(position, levelId = 'l5', random = Math.random) {
         position,
         depth - 1,
         -INF,
-        level.blunder > 0 ? INF : -alpha,
+        level.blunder > 0 || level.noise > 0 ? INF : -alpha,
         1,
         ctx,
       );
@@ -386,9 +391,21 @@ export function chooseMove(position, levelId = 'l5', random = Math.random) {
     const top = rootScores[0].score;
     const mistakes = rootScores.slice(1).filter((entry) => top - entry.score <= level.blunderLoss);
     if (mistakes.length) {
-      const picked = mistakes[Math.floor(random() * mistakes.length)].move;
-      blundered = picked !== best;
-      best = picked;
+      const picked = mistakes[Math.floor(random() * mistakes.length)];
+      blundered = picked.move !== best;
+      best = picked.move;
+      bestScore = picked.score;
+    }
+  }
+
+  // Variation only affects completed root scores, never alpha/beta bounds.
+  if (!blundered && completed && level.noise > 0 && Math.abs(bestScore) < MATE / 2) {
+    const top = rootScores[0].score;
+    let varied = -INF;
+    for (const entry of rootScores) {
+      if (top - entry.score > 2 * level.noise) continue;
+      const score = entry.score + (random() * 2 - 1) * level.noise;
+      if (score > varied) { varied = score; best = entry.move; bestScore = entry.score; }
     }
   }
 

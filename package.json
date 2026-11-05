@@ -1,14 +1,14 @@
 {
   "name": "deepchess",
-  "version": "0.7.0",
-  "private": true,
+  "version": "0.7.1",
   "description": "深棋 DeepChess — 和像素风 DeepSeek 娘下一盘会斗嘴的国际象棋。",
   "type": "module",
   "scripts": {
     "build": "node src/build.mjs",
-    "test": "node --test test/persona.mjs test/dialogue.mjs test/panel.mjs",
+    "test": "node --test test/persona.mjs test/dialogue.mjs test/panel.mjs test/regressions.mjs",
     "test:rules": "node test/perft.mjs",
-    "test:ai": "node test/ai.mjs"
+    "test:ai": "node test/ai.mjs",
+    "test:browser": "node test/browser.mjs"
   },
   "main": "./index.js",
   "exports": {
@@ -25,6 +25,9 @@
     "locale/*.json",
     "icon.svg",
     "README.md",
+    "CHANGELOG.md",
+    "preview.png",
+    "wide-preview.png",
     "LICENSE",
     "LICENSE-OFL.txt",
     "THIRD_PARTY.md"

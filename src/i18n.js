@@ -1,6 +1,8 @@
 export const NS = 'deepchess';
 
 export const zh = {
+  'search.failed': '棋局计算暂时无法启动，请重试或重新加载插件。',
+  'search.retry': '重试',
   'tab.title': '深棋',
   'tab.desc': '和 DeepSeek 娘下一盘会斗嘴的国际象棋',
   'name': 'DeepSeek',
@@ -104,6 +106,8 @@ export const zh = {
 };
 
 export const en = {
+  'search.failed': 'Chess calculation could not start. Retry or reload the plugin.',
+  'search.retry': 'Retry',
   'tab.title': 'DeepChess',
   'tab.desc': 'Play chess against a teasing DeepSeek girl.',
   'name': 'DeepSeek',
